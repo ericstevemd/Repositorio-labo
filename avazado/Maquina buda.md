@@ -1,4 +1,4 @@
-
+a
 Vamos A realiza la maquina buda ya que esta maquina tiene de todo 
 como primer paso vamos a realizar  un reconocimiento 
 ```
