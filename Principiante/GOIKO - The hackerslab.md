@@ -94,7 +94,7 @@ chmod 777 find
 echo $PATH
 /usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
 
-
+ P
 ![[Pasted image 20260930170612.png]]
 
 sudo PATH=/opt/porno:$PATH /opt/porno/watchporn.sh 
