@@ -214,19 +214,17 @@ Ese hash **no es la contraseña**: es una respuesta criptográfica al reto del s
 **a) Cracking offline** — hashcat en modo `5600` (NetNTLMv2) o john con formato `netntlmv2`:
 
 ```
-hashcat -m 5600 svc.scanner.hash /usr/share/wordlists/rockyou.txt
-john --format=netntlmv2 svc.scanner.hash --wordlist=/usr/share/wordlists/rockyou.txt
+hashcat -m 5600 hash.txt /usr/share/wordlists/rockyou.txt
+
 ```
 
-Antes de lanzarte con rockyou, prueba las contraseñas que ya conocemos del backup (`Welcome123!`, `ITAdmin2019!`) o variantes obvias (`Scann3r!`, `svc_scanner`...).
 
-**b) Relay NTLM** — si no se crackea, el hash también sirve para relayarlo con `ntlmrelayx`.
+por lo cual encontramos contraseña 
 
-## 9. Siguiente paso (pendiente)
+```
+1summerlove!
+``` 
 
-- [x] Capturar usuarios con `kerbrute`.
-- [x] Capturar el hash de `CTF\svc.scanner` con Responder.
-- [ ] Crackingear el hash o relay.
-- [ ] Enumerar el resto de cuentas (`svc.mssql`, `helpdesk.bob`, `it.admin`) con lista propia o LDAP.
-- [ ] Revisar `IT-Portal.html`.
-- [ ] Escalada de privilegios.
+domo podemos ver que tenemos credenciales 
+
+![[Pasted image 20261027004943.png]]

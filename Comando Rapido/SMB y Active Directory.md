@@ -56,6 +56,17 @@ nxc smb <IP> -u '<usuario>' -p '<contraseña>' --users
 nxc ldap <IP> -u '<usuario>' -p '<contraseña>' --users      # usuarios vía LDAP (más campos)
 ```
 
+Ejemplo real (dominio `ctf.local`, con credenciales de un usuario de servicio que ya tenemos):
+
+```
+nxc smb 10.65.172.243 -d ctf.local -u 'svc.scanner' -p '1summerlove!' --users
+```
+
+- `-d ctf.local` → dominio al que se autentica. Sin él, nxc se autentica como máquina de trabajo local (`WORKGROUP`) y la cuenta de dominio no sirve: en controladores de dominio siempre hay que pasar `-d`.
+- `--users` → lista los usuarios del dominio usando unas credenciales ya válidas (el paso típico tras robar una cuenta de servicio: ves el resto de usuarios y sigues con ellos).
+- Se pueden apilar opciones: `--users --shares --pass-pol` saca todo de una sola pasada.
+- **Cuidado con los espacios dentro de las comillas**: `-u 'svc.scanner '` (con espacio final) autentica como `svc.scanner ` y devuelve `STATUS_LOGON_FAILURE`.
+
 Política de contraseñas (sin credenciales, acceso anónimo):
 
 ```
@@ -150,8 +161,8 @@ ldapsearch -x -H ldap://<IP> -b "dc=dominio,dc=loc" "(cn=rduke)" cn member
 
 Sesión interactiva sin credenciales:
 
-```
-rpcclient -U "" <IP> -N
+
+
 ```
 
 Dentro del `rpcclient:` se puede ir probando RIDs a mano (`queryuser 500`, `queryuser 501`...), o recorrer un rango con un bucle:
