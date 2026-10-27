@@ -1,1 +1,1 @@
-Bienvenido a este repositorio donde podemos realizar laboratorio de nivel principiante a nivel profesional, donde vemos material de TheHackLabs, Hack The Box y entre otras páginas conocidas.
+Bienvenido a este repositorio, donde reunimos notas de laboratorios de ciberseguridad de nivel principiante hasta nivel profesional, con material de The Hackers Lab, TryHackMe, Hack The Box y otras páginas conocidas.
