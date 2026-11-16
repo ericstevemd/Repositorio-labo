@@ -104,7 +104,33 @@ done
 - `grep username` → filtra el campo.
 - `cut -d\" -f4` → extrae el valor entre comillas.
 
-## 8. Diccionario propio con CeWL
+Extraer los usuarios/correos de una página de equipo o plantilla (en **Domino** salieron así los `firstname.lastname` para la fuerza bruta):
+
+```
+curl -s http://IP/team.php | grep -oP 'mailto:\K[^"]+'
+```
+
+- `grep -oP` → solo la coincidencia, con sintaxis Perl.
+- `\K` → descarta lo anterior (`mailto:`) y devuelve únicamente el correo.
+
+## 8. Revisar el código fuente (JavaScript / HTML)
+
+El JavaScript de la página suele esconder endpoints, claves y configuración que no se ven en la UI (en **Domino**, `/static/app.js` contenía la clave AES del backup):
+
+```
+curl -s http://IP/static/app.js
+```
+
+Buscar directamente datos sensibles:
+
+```
+curl -s http://IP/static/app.js | grep -iE "key|secret|token|password|api"
+```
+
+- Ver también el HTML de las páginas con `curl -s http://IP/pagina.php` (formularios ocultos, comentarios, rutas).
+- `view-source:` en el navegador hace lo mismo para el JS embebido en el HTML.
+
+## 9. Diccionario propio con CeWL
 
 Genera una lista de palabras a partir del contenido de una página web:
 
@@ -117,7 +143,7 @@ cewl -d 2 -m 7 --lowercase --with-numbers -w cewl_words.txt http://<dominio>:<pu
 - `--lowercase` → todo en minúsculas.
 - `--with-numbers` → incluye palabras con números.
 
-## 9. Diccionarios usados en este repo
+## 10. Diccionarios usados en este repo
 
 - `/usr/share/wordlists/dirb/common.txt`
 - `/home/kali/SecLists/Discovery/Web-Content/common.txt`

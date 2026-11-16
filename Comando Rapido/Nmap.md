@@ -1,6 +1,6 @@
 # Nmap — escaneo de puertos
 
-Comandos usados en las notas de este repositorio para el reconocimiento inicial.
+Comandos usados en las notas de este repositorio para el reconocimiento inicial (Forward, Domino y **Monitor silencioso** incluyen `-oN` para guardar la salida legible).
 
 ## 1. Escaneo básico (versión de servicios y scripts por defecto)
 
@@ -37,6 +37,15 @@ nmap -p- --open -sV -sC -sS -T4 -n -Pn -vvv <IP> -oG open_port.txt
 ```
 grep open open_port.txt
 ```
+
+En las máquinas más nuevas del repo se guarda en formato normal (`-oN`), que es el que se pega tal cual en las notas:
+
+```
+nmap -sV -sC -p- <IP> -oN scan_port.txt
+```
+
+- `-oN archivo.txt` → salida en texto plano (sin colores ni formato).
+- `-oA prefijo` → guarda a la vez `.nmap`, `.gnmap` y `.xml` (lo usa `enum4linux-ng` igualmente).
 
 ## 4. Puertos y servicios que suelen aparecer en estas máquinas
 

