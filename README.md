@@ -23,7 +23,7 @@ Laboratorio de ciberseguridad, desde nivel **principiante** hasta nivel **profes
 | --- | --- |
 | `Comando Rapido/Nmap.md` | Escaneo de puertos y scripts |
 | `Comando Rapido/Enumeracion web.md` | gobuster, wfuzz, ffuf, whatweb, CeWL, `/etc/hosts`, SSRF |
-| `Comando Rapido/Comandos básicos.md` | SSH, SCP, comandos `net`, FTP anónimo |
+| `Comando Rapido/Comandos básicos.md` | SSH, SCP, comandos `net`, FTP anónimo, telnet/banners, DNS |
 | `Comando Rapido/WordPress y wpscan.md` | Enumeración de usuarios, fuerza bruta y exploits de plugins |
 | `Comando Rapido/SQLmap.md` | Inyección SQL, JWT/Bearer y volcado de bases de datos |
 | `Comando Rapido/Fuerza bruta y crackeo.md` | hydra, John the Ripper, esteganografía |
