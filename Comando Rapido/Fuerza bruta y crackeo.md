@@ -100,6 +100,15 @@ john --format=krb5asrep asrep.hash --wordlist=/usr/share/wordlists/rockyou.txt
 
 - hashcat → modo **`18200`**; john → formato **`krb5asrep`**.
 
+**Clave privada SSH (`ssh2john`)** (como en **GOIKO**):
+
+```
+ssh2john id_rsa > hash.txt
+john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+```
+
+- Convierte una clave privada SSH en un hash que John entiende; si la clave está protegida por passphrase, este es el camino para crackearla.
+
 **Vault KeePass (`.kdbx`)** (como en **Monitor silencioso**):
 
 ```

