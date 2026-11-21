@@ -32,6 +32,7 @@ Laboratorio de ciberseguridad, desde nivel **principiante** hasta nivel **profes
 | `Comando Rapido/Escalada de privilegios Linux.md` | sudo, GTFOBins, SUID, cron, PATH, wildcard injection en `tar` |
 | `Comando Rapido/Escalada de privilegios Windows.md` | Privilegios, JuicyPotato, PetitPotam, servicios |
 | `Comando Rapido/Penelope — reverse shell.md` | Handler de reverse shells con hooks de post-explotación |
+| `Comando Rapido/Reverse shell Node.js.md` | Payloads de reverse shell para apps Node.js/Express (módulo y socket) |
 | `Comando Rapido/THM — comandos rápidos.md` | RDP (`xfreerdp`), credenciales en el registro, servicios Windows |
 
 ## Cómo usarlo

