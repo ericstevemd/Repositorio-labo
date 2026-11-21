@@ -304,9 +304,34 @@ Re-ejecución el 20/11 con el mismo resultado (mismo `clean_users.txt`):
 
 ---
 
-## 8. Pendiente: la cadena hasta las dos flags
+## 8. Validación de credenciales por SMB y GPP en SYSVOL
 
-Las capturas llegan hasta el hash de `TABATHA_BRITT` (§5). Según los writeups públicos, el tramo que falta tiene **dos caminos** hasta las flags:
+Con la contraseña crakeada en §5 se validan las credenciales contra SMB. El **primer intento falla por un typo** en la contraseña (`marlboro(1985))`) → `STATUS_LOGON_FAILURE`; repetido limpio → `[+]` y shares enumerados (`Data` con `READ,WRITE`):
+
+![[Pasted image 20261120220953.png]]
+
+```bash
+nxc smb IP_MACHINA -u 'TABATHA_BRITT' -p 'marlboro(1985)' --shares
+```
+
+> ⚠️ **Lección:** un `STATUS_LOGON_FAILURE` tras un spray de una sola cuenta casi siempre es **typo**, no contraseña mala. Repite la credencial a mano antes de descartarla.
+
+A continuación, búsqueda de contraseñas GPP en SYSVOL (el clásico `cpassword` en XML):
+
+```bash
+nxc smb IP_MACHINA -u 'TABATHA_BRITT' -p 'marlboro(1985)' -M gpp_password
+```
+
+![[Pasted image 20261120221804.png]]
+
+- `[+] Found SYSVOL share` → `[+] Searching for potential XML files containing passwords`.
+- **Pendiente:** la captura queda en la búsqueda; sin `cpassword` visible, la vía sigue siendo la cadena de ACLs (§9).
+
+---
+
+## 9. Pendiente: la cadena hasta las dos flags
+
+Las capturas llegan hasta la validación de `TABATHA_BRITT` (§8). Según los writeups públicos, el tramo que falta tiene **dos caminos** hasta las flags:
 
 **Camino A — forzar autenticación (NTLM theft):**
 1. Los nombres de `onboarding` cambian = **hay alguien navegando el share**.
@@ -315,8 +340,9 @@ Las capturas llegan hasta el hash de `TABATHA_BRITT` (§5). Según los writeups 
 
 **Camino B — AS-REP Roast + cadena de ACLs (por aquí vas):**
 1. ✅ **Hecho (§5):** `GetNPUsers` con la lista corregida → hashes de `ERNESTO_SILVA`, `TABATHA_BRITT`, `LEANN_LONG` → `john` → **`TABATHA_BRITT` = `marlboro(1985)`**.
-2. Pendiente — BloodHound: `TABATHA_BRITT` →`GenericAll`→ `SHAWNA_BRAY` →`ForceChangePassword`→ `CRUZ_HALL` →`GenericWrite`→ `DARLA_WINTERS` (resetear contraseñas con `net rpc password`).
-3. `DARLA_WINTERS` tiene **constrained delegation** sobre `cifs/haystack.thm.corp`:
+2. ✅ **Hecho (§8):** credenciales validadas por SMB (`[+]` + shares) y GPP explorado en SYSVOL.
+3. Pendiente — BloodHound: `TABATHA_BRITT` →`GenericAll`→ `SHAWNA_BRAY` →`ForceChangePassword`→ `CRUZ_HALL` →`GenericWrite`→ `DARLA_WINTERS` (resetear contraseñas con `net rpc password`).
+4. `DARLA_WINTERS` tiene **constrained delegation** sobre `cifs/haystack.thm.corp`:
    ```bash
    getST.py -spn "cifs/haystack.thm.corp" -impersonate "Administrator" "thm.corp/DARLA_WINTERS:<pass>"
    export KRB5CCNAME=Administrator.ccache
@@ -328,7 +354,7 @@ Las capturas llegan hasta el hash de `TABATHA_BRITT` (§5). Según los writeups 
 
 ---
 
-## 9. Flags
+## 10. Flags
 
 | Flag | Valor | Estado |
 | --- | --- | --- |
@@ -339,14 +365,15 @@ Las capturas llegan hasta el hash de `TABATHA_BRITT` (§5). Según los writeups 
 
 ---
 
-## 10. Lecciones
+## 11. Lecciones
 
 1. **`--rid-brute` con anonymous = lista de usuarios sin coste** — el paso previo obligatorio para cualquier spray o AS-REP.
 2. **`-usersfile` de GetNPUsers quiere usuarios**, no wordlists de directorios: si ves `KDC_ERR_C_PRINCIPAL_UNKNOWN` en masa, revisa la lista.
 3. **`awk '{print $6}'` rompe los nombres con espacios** → falsos usuarios (`Domain`, `Schema`…) y resultados basura. Usa `grep SidTypeUser | cut`.
 4. **`[+] ... (Guest)` con nxc no es una credencial válida** — es la sesión de invitada del null session.
-5. **Un share con ficheros que cambian de nombre = actividad humana** → `ntlm_theft` + `responder` para capturar hashes (ojo, es el camino corto a `automate`).
-6. **La cadena completa del dominio:** contraseña por defecto → spray → AS-REP → reset de contraseñas por ACLs → **constrained delegation** → Administrator. Cada eslabón por sí solo no es grave; juntos, dominio caído.
-7. **THM reinicia la VM y cambia la IP**: lleva un fichero con IPs, usuarios y contraseles entre sesiones.
+5. **Un `STATUS_LOGON_FAILURE` de una sola cuenta suele ser typo**, no contraseña mala (§8).
+6. **Un share con ficheros que cambian de nombre = actividad humana** → `ntlm_theft` + `responder` para capturar hashes (ojo, es el camino corto a `automate`).
+7. **La cadena completa del dominio:** contraseña por defecto → spray → AS-REP → reset de contraseñas por ACLs → **constrained delegation** → Administrator. Cada eslabón por sí solo no es grave; juntos, dominio caído.
+8. **THM reinicia la VM y cambia la IP**: lleva un fichero con IPs, usuarios y contraseñas entre sesiones.
 
 > Comandos relacionados: `Comando Rapido/Nmap.md`, `Comando Rapido/SMB y Active Directory.md`, `Comando Rapido/Fuerza bruta y crackeo.md`.
